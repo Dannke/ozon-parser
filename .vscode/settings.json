@@ -1,0 +1,26 @@
+{
+    // Интерпретатор из виртуального окружения проекта.
+    // Применяется, только если для рабочей области ещё не выбран другой:
+    // иначе смените его вручную через "Python: Select Interpreter".
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+
+    // Корень проекта в путях поиска Pylance - чтобы резолвился пакет
+    // ozon_parser и точки входа рядом с ним.
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ],
+
+    // Автоматически активировать .venv в новом терминале.
+    "python.terminal.activateEnvironment": true,
+
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/.ruff_cache": true
+    }
+}

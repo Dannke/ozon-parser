@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ozon-parser"
+version = "1.1.0"
+description = "Парсер карточек товаров ozon.ru с ежедневной выгрузкой в CSV / PostgreSQL / ClickHouse"
+requires-python = ">=3.9"
+dependencies = [
+    "playwright==1.63.0",
+    "google-api-python-client==2.147.0",
+    "google-auth==2.35.0",
+    "google-auth-oauthlib==1.2.1",
+    "python-dotenv==1.0.1",
+]
+
+# Драйверы БД нужны только соответствующему бэкенду, поэтому вынесены сюда:
+# запуск с STORAGE=csv не должен требовать ни psycopg2, ни clickhouse-connect.
+#     pip install -e ".[postgres]"
+#     pip install -e ".[dev]"
+[project.optional-dependencies]
+postgres = ["psycopg2-binary==2.9.9"]
+clickhouse = ["clickhouse-connect==0.8.3"]
+dev = [
+    "pytest==8.3.3",
+    "jinja2==3.1.6",
+    "ruff==0.16.8",
+]
+
+[project.scripts]
+ozon-parse = "ozon_parser.parse:main"
+ozon-login = "ozon_parser.login:main"
+ozon-check = "ozon_parser.check:main"
+
+[tool.setuptools]
+packages = ["ozon_parser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Короткая трассировка: в тестах-фикстурах длинная только мешает читать.
+addopts = "-q --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [".venv", "logs", "data"]
+
+[tool.ruff.lint]
+# E/W - pycodestyle, F - pyflakes, I - сортировка импортов,
+# B - типичные ловушки (bugbear), BLE - голые except Exception,
+# UP - устаревшие конструкции.
+select = ["E", "W", "F", "I", "B", "BLE", "UP"]
+ignore = [
+    # Сообщения и шаблоны SQL собираются через .format() - единый стиль проекта.
+    "UP032",
+    # Optional[X] вместо X | None: пакет поддерживает Python 3.9.
+    "UP045",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Тесты намеренно лезут во внутренности модулей и подменяют sys.modules.
+"tests/*" = ["BLE001"]

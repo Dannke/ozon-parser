@@ -1,0 +1,18 @@
+# Секреты: не коммитить и не класть в архив для передачи.
+.env
+credentials.json
+token.json
+cookies.json
+
+# Окружение и кэши
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Результаты и логи прогонов
+data/
+logs/
+*.tmp
