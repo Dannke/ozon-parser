@@ -29,7 +29,7 @@ FALLBACK_CHANNELS = ("msedge", "chrome")
 CONTEXT_DEFAULTS = {
     "locale": "ru-RU",
     "timezone_id": "Europe/Moscow",
-    "viewport": {"width": 1440, "height": 900},
+    "viewport": {"width": 1240, "height": 680},
 }
 
 LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
@@ -132,7 +132,7 @@ def pass_challenge(page: Page, response=None, timeout: Optional[int] = None) -> 
 
     Заглушка "Antibot Challenge Page" - это JS-проверка браузера: обычно
     через 5-10 секунд она сама перезагружает страницу уже с настоящим
-    содержимым. Сдаваться сразу нельзя, но и ждать бесконечно тоже.
+    содержимым.
 
     :param timeout: сколько секунд ждать; по умолчанию CHALLENGE_TIMEOUT.
     """

@@ -27,7 +27,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
@@ -80,8 +80,8 @@ class GmailTransientError(GmailError):
     """Временный сбой Gmail API (429/5xx): стоит подождать и повторить."""
 
 
-def _status_of(exc: HttpError) -> int:
-    """Код ответа из HttpError, не полагаясь на версию библиотеки."""
+def _status_of(exc: Exception) -> int:
+    """Код ответа из HttpError (0 - кода нет), не полагаясь на версию библиотеки."""
     response = getattr(exc, "resp", None)
     try:
         return int(getattr(response, "status", 0) or 0)
@@ -109,66 +109,96 @@ class GmailCodeReader:
 
     def __init__(self, settings: GmailSettings) -> None:
         self.settings = settings
-        self._service = None
+        # Клиент Gmail API. Его методы (users(), messages() ...) создаются
+        # динамически из описания API, поэтому статически он типизируется как Any.
+        self._service: Optional[Any] = None
 
     # --------------------------------------------------------------- доступ --
     def _authorize(self) -> Credentials:
-        """Возвращает валидные учётные данные, при необходимости обновляя токен."""
-        creds: Optional[Credentials] = None
-        token_file = self.settings.token_file
+        """Возвращает валидные учётные данные, при необходимости обновляя токен.
 
-        if token_file.exists():
-            try:
-                creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
-            except (ValueError, OSError) as exc:
-                log.warning("Файл токена повреждён (%s), будет создан заново", exc)
-                creds = None
-
-        if creds and creds.valid:
+        Порядок: сохранённый token.json -> его обновление по refresh-токену ->
+        окно согласия Google (только при запуске с человеком).
+        """
+        creds = self._load_saved_token()
+        if creds is not None and creds.valid:
             return creds
 
-        # Токен протух, но есть refresh_token - пробуем обновить без участия человека.
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                log.info("Обновляю истёкший токен Gmail")
-                creds.refresh(Request())
-            except RefreshError as exc:
-                log.warning("Обновить токен не вышло (%s), нужна повторная авторизация", exc)
-                creds = None
-            except TransportError as exc:
-                raise GmailError(
-                    "Нет связи с Google для обновления токена: {}".format(exc)) from exc
-
-        if not creds or not creds.valid:
-            if not self.settings.interactive:
-                raise GmailError(
-                    "Токен Gmail ({}) отсутствует или отозван, а окно согласия Google "
-                    "в фоновом запуске открыть некому. Выполните python get_cookies.py "
-                    "--force на машине с браузером и перенесите token.json. Если токен "
-                    "протухает раз в неделю, OAuth-приложение в Google Cloud в статусе "
-                    "Testing - переведите его в Production.".format(token_file.name)
-                )
-            if not self.settings.credentials_file.exists():
-                raise GmailError(
-                    "Не найден файл OAuth-клиента: {}. "
-                    "Скачайте credentials.json из Google Cloud Console.".format(
-                        self.settings.credentials_file
-                    )
-                )
-            log.info("Запускаю OAuth-авторизацию Gmail (откроется окно браузера)")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(self.settings.credentials_file), SCOPES
-            )
-            creds = flow.run_local_server(port=0)
+        if creds is not None and creds.expired and creds.refresh_token:
+            creds = self._refresh(creds)
+        if creds is None or not creds.valid:
+            creds = self._request_consent()
 
         # В файле лежит refresh-токен к почте - он доступен только владельцу.
         try:
-            write_private(token_file, creds.to_json())
-            log.info("Токен Gmail сохранён: %s", token_file)
+            write_private(self.settings.token_file, creds.to_json())
+            log.info("Токен Gmail сохранён: %s", self.settings.token_file)
         except OSError as exc:
             log.warning("Не удалось сохранить токен: %s", exc)
-
         return creds
+
+    def _load_saved_token(self) -> Optional[Credentials]:
+        """Учётные данные из token.json; None - файла нет или он повреждён."""
+        token_file = self.settings.token_file
+        if not token_file.exists():
+            return None
+        try:
+            return Credentials.from_authorized_user_file(str(token_file), SCOPES)
+        except (ValueError, OSError) as exc:
+            log.warning("Файл токена повреждён (%s), будет создан заново", exc)
+            return None
+
+    @staticmethod
+    def _refresh(creds: Credentials) -> Optional[Credentials]:
+        """Обновляет протухший токен без участия человека; None - не вышло."""
+        try:
+            log.info("Обновляю истёкший токен Gmail")
+            creds.refresh(Request())
+        except RefreshError as exc:
+            log.warning("Обновить токен не вышло (%s), нужна повторная авторизация", exc)
+            return None
+        except TransportError as exc:
+            raise GmailError("Нет связи с Google для обновления токена: {}".format(exc)) from exc
+        return creds
+
+    def _request_consent(self) -> Credentials:
+        """Открывает окно согласия Google и возвращает новые учётные данные."""
+        if not self.settings.interactive:
+            raise GmailError(
+                "Токен Gmail ({}) отсутствует или отозван, а окно согласия Google "
+                "в фоновом запуске открыть некому. Выполните python get_cookies.py "
+                "--force на машине с браузером и перенесите token.json. Если токен "
+                "протухает раз в неделю, OAuth-приложение в Google Cloud в статусе "
+                "Testing - переведите его в Production.".format(self.settings.token_file.name)
+            )
+        if not self.settings.credentials_file.exists():
+            raise GmailError(
+                "Не найден файл OAuth-клиента: {}. "
+                "Скачайте credentials.json из Google Cloud Console.".format(
+                    self.settings.credentials_file
+                )
+            )
+
+        log.info("Запускаю OAuth-авторизацию Gmail (откроется окно браузера)")
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(self.settings.credentials_file), SCOPES
+        )
+        creds = flow.run_local_server(port=0)
+        # Библиотека объявляет два возможных класса учётных данных, но для
+        # OAuth-клиента типа «Desktop app» это всегда google.oauth2 Credentials.
+        if not isinstance(creds, Credentials):
+            raise GmailError(
+                "Google вернул учётные данные неожиданного типа: {}. Проверьте, что "
+                "credentials.json - OAuth-клиент типа Desktop app".format(type(creds).__name__)
+            )
+        return creds
+
+    @property
+    def _api(self) -> Any:
+        """Клиент Gmail API; обращаться к нему можно только после connect()."""
+        if self._service is None:
+            raise GmailError("Gmail API не подключён: сначала вызовите connect()")
+        return self._service
 
     def connect(self) -> None:
         """Создаёт клиент Gmail API.
@@ -284,7 +314,7 @@ class GmailCodeReader:
         """Список id свежих писем, подходящих под поисковый запрос Gmail."""
         try:
             response = (
-                self._service.users()
+                self._api.users()
                 .messages()
                 # Письмо с кодом нередко попадает в «Спам» - ищем и там.
                 .list(userId="me", q=query, maxResults=limit, includeSpamTrash=True)
@@ -299,7 +329,7 @@ class GmailCodeReader:
     def _fetch_message(self, message_id: str) -> Optional[dict]:
         try:
             return (
-                self._service.users()
+                self._api.users()
                 .messages()
                 .get(userId="me", id=message_id, format="full")
                 .execute()

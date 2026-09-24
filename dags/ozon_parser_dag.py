@@ -33,6 +33,11 @@ Windows: Airflow нативно под Windows не работает - нуже�
 Docker. Сам парсер при этом кроссплатформенный.
 """
 
+# Airflow и pendulum есть в окружении Airflow, а не в .venv проекта - так
+# задумано (см. выше), поэтому их импорты проверка типов не разрешает.
+# Запись "a >> b" задаёт порядок задач: значение выражения не нужно.
+# pyright: reportMissingImports=false, reportUnusedExpression=false
+
 from __future__ import annotations
 
 import datetime as dt

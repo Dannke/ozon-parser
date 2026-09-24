@@ -31,15 +31,7 @@ import pytest
 DAG_FILE = Path(__file__).resolve().parents[1] / "dags" / "ozon_parser_dag.py"
 
 # Модули, которые подменяются заглушками - чтобы потом убрать за собой.
-STUBBED_MODULES = (
-    "airflow",
-    "airflow.exceptions",
-    "airflow.models",
-    "airflow.operators",
-    "airflow.operators.bash",
-    "airflow.operators.python",
-    "pendulum",
-)
+STUBBED_MODULES = ("airflow", "airflow.operators", "airflow.operators.bash", "pendulum")
 
 # Запуск 23-го в 05:30 закрывает интервал [22-е 05:30, 23-е 05:30).
 # Срез должен датироваться днём ЗАПУСКА, то есть концом интервала: цены,
@@ -80,53 +72,26 @@ class FakeDAG:
         return False
 
 
-def install_stubs():
-    airflow = types.ModuleType("airflow")
-    airflow.DAG = FakeDAG
+def stub_module(name: str, **attributes) -> types.ModuleType:
+    """Модуль-заглушка с заданными атрибутами."""
+    module = types.ModuleType(name)
+    module.__dict__.update(attributes)
+    return module
 
-    exceptions = types.ModuleType("airflow.exceptions")
 
-    class AirflowFailException(Exception):
-        pass
+def install_stubs() -> None:
+    """Подменяет airflow и pendulum ровно тем, что импортирует файл DAG.
 
-    exceptions.AirflowFailException = AirflowFailException
-    exceptions.AirflowSkipException = type("AirflowSkipException", (Exception,), {})
-
-    models = types.ModuleType("airflow.models")
-
-    class Variable:
-        store = {}
-
-        @classmethod
-        def get(cls, key, default_var=None):
-            return cls.store.get(key, default_var)
-
-    models.Variable = Variable
-    models.DAG = FakeDAG
-
-    bash = types.ModuleType("airflow.operators.bash")
-    bash.BashOperator = FakeTask
-
-    python_mod = types.ModuleType("airflow.operators.python")
-    python_mod.PythonOperator = FakeTask
-
-    operators = types.ModuleType("airflow.operators")
-
-    pendulum_mod = types.ModuleType("pendulum")
-    pendulum_mod.datetime = lambda *a, **kw: dt.datetime(*a)
-
-    for name, module in [
-        ("airflow", airflow),
-        ("airflow.exceptions", exceptions),
-        ("airflow.models", models),
-        ("airflow.operators", operators),
-        ("airflow.operators.bash", bash),
-        ("airflow.operators.python", python_mod),
-        ("pendulum", pendulum_mod),
-    ]:
-        sys.modules[name] = module
-
-    return Variable, AirflowFailException
+    Путь Airflow 3 (airflow.providers.standard) намеренно не подменяется:
+    DAG должен откатиться на импорт Airflow 2.
+    """
+    sys.modules.update({
+        "airflow": stub_module("airflow", DAG=FakeDAG),
+        "airflow.operators": stub_module("airflow.operators"),
+        "airflow.operators.bash": stub_module("airflow.operators.bash", BashOperator=FakeTask),
+        "pendulum": stub_module("pendulum",
+                                datetime=lambda *args, **kwargs: dt.datetime(*args)),
+    })
 
 
 _loaded = None
@@ -140,10 +105,9 @@ def load_dag():
     """
     global _loaded
     if _loaded is None:
-        variable, fail_exception = install_stubs()
+        install_stubs()
         sys.path.insert(0, str(DAG_FILE.parent))
-        module = __import__(DAG_FILE.stem)
-        _loaded = (module, variable, fail_exception)
+        _loaded = __import__(DAG_FILE.stem)
     return _loaded
 
 
@@ -228,7 +192,7 @@ def test_parse_task_runs_headless():
 
 def test_commands_render_with_defaults():
     """Команды отрисовываются без заданных переменных Airflow."""
-    module, _, _ = load_dag()
+    module = load_dag()
     for name, template in _templates(module) + (("ensure_session", module.SESSION_COMMAND),):
         text = render(template, {})
         assert "{{" not in text and "}}" not in text, "{}: остались шаблоны: {}".format(name, text)
@@ -238,7 +202,7 @@ def test_commands_render_with_defaults():
 
 def test_commands_render_with_variables():
     """Переменные Airflow подставляются в команды."""
-    module, _, _ = load_dag()
+    module = load_dag()
     custom = {
         "ozon_project_dir": "/srv/ozon",
         "ozon_python": "/srv/ozon/.venv/bin/python",
@@ -259,7 +223,7 @@ def test_snapshot_date_is_run_day():
     23-го в 05:30 писал цены в срез за 22-е - вся временная ось витрины
     v_ozon_products_daily была сдвинута на сутки.
     """
-    module, _, _ = load_dag()
+    module = load_dag()
     for name, template in _templates(module):
         text = render(template, {})
         assert "--date {}".format(RUN_DAY) in text, "{}: дата среза {!r}".format(name, text)
@@ -267,7 +231,7 @@ def test_snapshot_date_is_run_day():
 
 def test_min_success_rate_is_passed_to_parser():
     """Один разобранный товар из пятисот не должен считаться успехом."""
-    module, _, _ = load_dag()
+    module = load_dag()
     assert "--min-success-rate 0.8" in render(module.PARSE_COMMAND, {})
     assert "--min-success-rate 0.5" in render(module.PARSE_COMMAND,
                                               {"ozon_min_success_rate": "0.5"})
@@ -279,7 +243,7 @@ def test_session_task_refreshes_stale_session_without_human():
     --non-interactive запрещает ручной вход и окно согласия Google, которые
     на сервере некому пройти; лимит возраста берётся из переменной Airflow.
     """
-    module, _, _ = load_dag()
+    module = load_dag()
     text = render(module.SESSION_COMMAND, {})
     assert "get_cookies.py" in text
     assert "--non-interactive" in text

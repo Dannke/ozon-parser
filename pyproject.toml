@@ -26,6 +26,7 @@ dev = [
     "pytest==8.3.3",
     "jinja2==3.1.6",
     "ruff==0.16.8",
+    "pyright==1.1.414",
 ]
 
 [project.scripts]
@@ -40,6 +41,13 @@ packages = ["ozon_parser"]
 testpaths = ["tests"]
 # Короткая трассировка: в тестах-фикстурах длинная только мешает читать.
 addopts = "-q --tb=short"
+
+# Проверка типов: те же настройки подхватывает Pylance в VS Code.
+[tool.pyright]
+pythonVersion = "3.9"
+venvPath = "."
+venv = ".venv"
+exclude = [".venv", "logs", "data", "**/__pycache__"]
 
 [tool.ruff]
 line-length = 100
