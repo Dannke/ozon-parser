@@ -48,8 +48,8 @@ discovery:
   # sku). Файл годится и для старого сценария: python parse_ozon.py --file ...
   export_csv: data/panel_skus.csv
 
-  # panel_size подобран по замеру скорости парсера (README, раздел
-  # Performance): 8.7 SKU/мин -> 4 x 300 = 1200 SKU за ~2.3 ч в сутки, около
+  # panel_size подобран по замеру скорости парсера (docs/performance.md,
+  # «Размер panel»): 8.7 SKU/мин -> 4 x 300 = 1200 SKU за ~2.3 ч в сутки, около
   # трети 8-часового окна. Увеличение panel_size не перетасовывает panel:
   # discover доберёт недостающие SKU. Перед этим - python -m ozon_parser benchmark.
   categories:
@@ -84,7 +84,7 @@ discovery:
     # Альтернативный источник - отчёт «Аналитика товаров» на data.ozon.ru
     # (нужна действующая сессия data.ozon.ru в cookies.json). Он отдаёт только
     # окно из 1000 товаров, отсортированных по метрике, поэтому «хвост» здесь -
-    # это хвост топ-1000 по продажам, а не всей категории. См. README.
+    # это хвост топ-1000 по продажам, а не всей категории. См. docs/discovery.md.
     #
     # - name: smartphones_bestsellers
     #   title: "Смартфоны (data.ozon.ru)"
