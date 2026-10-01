@@ -41,7 +41,7 @@ import random
 import time
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
@@ -181,18 +181,23 @@ class ListingSource:
     """Листинг категории ozon.ru через внутренний API фронтенда.
 
     Два вида неудач обрабатываются по-разному:
-      * отказ Ozon (HTTP 403 / 429 или антибот-заглушка вместо JSON) - это
-        ограничение частоты запросов. Короткие повторы его только продлевают,
-        поэтому ждём по списку block_backoff (по умолчанию 10 с, 1, 3, 5 мин)
-        и заново открываем категорию. Если отказ не снялся - blocked = True,
-        и источник больше ничего не запрашивает;
-      * прочие сбои (обрыв, пустой ответ) - несколько коротких повторов, как
-        у парсера карточек (MAX_RETRIES).
+      * отказ Ozon (HTTP 403 / 429 или антибот-заглушка вместо JSON). Короткие
+        повторы его только продлевают, поэтому ждём по списку block_backoff
+        (по умолчанию 10 с, 1, 3, 5 мин) и повторяем в НОВОЙ сессии браузера
+        (new_page создаёт чистый контекст): в прогонах 29.09.2026 отказ
+        прилипал именно к сессии - в ней не помогало даже 10 минут ожидания,
+        а свежая сессия собирала категорию целиком. Если отказ не снялся -
+        blocked = True, и источник больше ничего не запрашивает;
+      * прочие сбои (обрыв, пустой ответ) - несколько коротких повторов в той
+        же сессии, как у парсера карточек (MAX_RETRIES).
+
+    :param new_page: создаёт вкладку в новом чистом контексте браузера.
     """
 
-    def __init__(self, page: Page, delay: float, jitter: float = 0.0,
+    def __init__(self, new_page: Callable[[], Page], delay: float, jitter: float = 0.0,
                  block_backoff: tuple = ()):
-        self.page = page
+        self.new_page = new_page
+        self.page = new_page()
         self.delay = delay
         self.jitter = jitter
         self.block_backoff = tuple(block_backoff)
@@ -272,10 +277,12 @@ class ListingSource:
                     return None
                 wait = self.block_backoff[blocks]
                 blocks += 1
-                log.warning("%s: страница %s: Ozon ограничил запросы (%s), жду %.0f с "
-                            "(ожидание %s из %s)", category.name, page_number, reason, wait,
-                            blocks, len(self.block_backoff))
+                log.warning("%s: страница %s: Ozon ограничил запросы (%s), жду %.0f с и "
+                            "повторяю в новой сессии браузера (ожидание %s из %s)",
+                            category.name, page_number, reason, wait, blocks,
+                            len(self.block_backoff))
                 time.sleep(wait)
+                self.page = self.new_page()
             else:
                 errors += 1
                 if errors > config.MAX_RETRIES:
@@ -285,8 +292,8 @@ class ListingSource:
                 log.warning("%s: страница %s не получена (%s), повтор %s из %s",
                             category.name, page_number, reason, errors, config.MAX_RETRIES)
                 time.sleep(self.delay * errors)
-            # Заново открытая категория - то, что делает живой посетитель
-            # после ошибки; так же проходит и антибот-проверка.
+            # Заново открытая категория: без неё API отвечает заглушкой, и так
+            # же проходит антибот-проверка.
             self._reopen(category)
 
 
@@ -460,9 +467,37 @@ def _needed(wh: Warehouse, category: CategoryConfig, rebuild: bool) -> tuple:
             max(category.tail_size - counts.get(GROUP_TAIL, 0), 0))
 
 
-def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfig, page: Page,
-                      rebuild: bool = False) -> CategoryResult:
-    """Обходит одну категорию и дописывает её panel."""
+class BrowserSessions:
+    """Чистые сессии браузера (контексты) для discovery.
+
+    Каждая категория обходится в своей сессии, и при отказе Ozon повтор
+    тоже идёт в новой. Основание - прогоны 29.09.2026 в Docker: дважды первая
+    категория в свежем браузере собиралась целиком (110 и 81 запрос), а
+    следующая в той же сессии сразу получала HTTP 403, и 10 минут ожидания
+    в этой сессии не помогали. Cookies каждого нового контекста - из
+    cookies.json, как и раньше.
+    """
+
+    def __init__(self, browser, storage_state: Optional[dict]):
+        self.browser = browser
+        self.storage_state = storage_state
+        self.context = None
+
+    def new_page(self) -> Page:
+        """Закрывает текущую сессию и открывает вкладку в новой."""
+        self.close()
+        self.context = browser_utils.new_context(self.browser, storage_state=self.storage_state)
+        return self.context.new_page()
+
+    def close(self) -> None:
+        if self.context is not None:
+            browser_utils.close_quietly(self.context)
+            self.context = None
+
+
+def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfig,
+                      sessions: BrowserSessions, rebuild: bool = False) -> CategoryResult:
+    """Обходит одну категорию в новой сессии браузера и дописывает её panel."""
     result = CategoryResult(category=category)
     top_needed, tail_needed = _needed(wh, category, rebuild)
     log.info("CATEGORY START category=%s source=%s panel_size=%s need_top=%s need_tail=%s",
@@ -486,14 +521,20 @@ def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfi
     try:
         notes = []
         if category.source == SOURCE_DATA_OZON:
-            source = DataOzonSource(page, settings.discovery.request_delay)
+            source = DataOzonSource(sessions.new_page(), settings.discovery.request_delay)
             top, tail, totals = discover_data_ozon(source, category)
             notes.append("окно отчёта data.ozon.ru: {} строк".format(totals))
             # Окно целиком уже на руках - хвост равномерно по всему окну.
             per_page = max(tail_needed, 1)
+            # Ozon обновляет токены сессии на лету; если не сохранить их, файл
+            # сессии устаревает раньше своего срока (так data.ozon.ru и выкинул
+            # на вход во время разведки).
+            if sessions.context is not None and session.has_auth_cookies(
+                    sessions.context.cookies()):
+                session.save_session(sessions.context, config.COOKIES_FILE)
         else:
             discovery_settings = settings.discovery
-            source = ListingSource(page, discovery_settings.request_delay,
+            source = ListingSource(sessions.new_page, discovery_settings.request_delay,
                                    discovery_settings.request_jitter,
                                    discovery_settings.block_backoff)
             crawl = discover_listing(source, category, top_needed, tail_needed, exclude, rng)
@@ -568,17 +609,15 @@ def run_discovery(wh: Warehouse, settings: Settings, names: Optional[list] = Non
             pending.append(category)
 
     if pending:
-        data_ozon_used = False
         with sync_playwright() as playwright:
             browser = browser_utils.launch(playwright)
-            context = browser_utils.new_context(browser, storage_state=state)
+            sessions = BrowserSessions(browser, state)
             try:
-                page = context.new_page()
                 stop_note = ""
                 for index, category in enumerate(pending):
                     if stop_note:
-                        # Ozon уже ограничил запросы: следующая категория
-                        # только продлила бы блокировку.
+                        # Ozon ограничил запросы даже в новой сессии: следующая
+                        # категория только продлила бы блокировку.
                         results[category.name] = CategoryResult(
                             category=category, status="stopped", note=stop_note)
                         continue
@@ -586,20 +625,14 @@ def run_discovery(wh: Warehouse, settings: Settings, names: Optional[list] = Non
                         log.info("Пауза между категориями: %.0f с",
                                  settings.discovery.category_pause)
                         time.sleep(settings.discovery.category_pause)
-                    result = discover_category(wh, settings, category, page, rebuild)
+                    result = discover_category(wh, settings, category, sessions, rebuild)
                     results[category.name] = result
-                    data_ozon_used |= (category.source == SOURCE_DATA_OZON
-                                       and result.status == "success")
                     if result.status == "blocked":
                         stop_note = ("не запускалась: Ozon ограничил запросы - повторите "
                                      "discover через 30-60 минут")
-                # Ozon обновляет токены сессии на лету; если не сохранить их,
-                # файл сессии устаревает раньше своего срока (так data.ozon.ru и
-                # выкинул на вход во время разведки). Сохраняем только удачную.
-                if data_ozon_used and session.has_auth_cookies(context.cookies()):
-                    session.save_session(context, config.COOKIES_FILE)
             finally:
-                browser_utils.close_quietly(context, browser)
+                sessions.close()
+                browser_utils.close_quietly(browser)
 
     ordered = [results[c.name] for c in categories]
     selected = sum(r.selected for r in ordered)

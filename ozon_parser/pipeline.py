@@ -30,7 +30,8 @@ from .warehouse import Warehouse
 log = get_logger("pipeline")
 
 # Ошибки, при которых SKU вообще не обрабатывался: в скорость не входят.
-NOT_ATTEMPTED = ("not_processed", "interrupted")
+# blocked - прогон остановлен предохранителем (Ozon отказывал SKU подряд).
+NOT_ATTEMPTED = ("not_processed", "interrupted", "blocked")
 
 
 class ParseLockBusy(RuntimeError):
@@ -117,6 +118,8 @@ class ParseReport:
 def run_status(success: int, errors: Counter) -> str:
     if errors.get("interrupted"):
         return "interrupted"
+    if errors.get("blocked"):
+        return "blocked"
     if not errors:
         return "success"
     return "partial" if success else "failed"
@@ -168,7 +171,8 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
         except DatabaseError as exc:
             log.error("Итог прогона %s не записан: %s", run_id, exc)
 
-    ok = report.success > 0 and report.success_rate >= settings.parser.min_success_rate
+    ok = (report.success > 0 and report.status != "blocked"
+          and report.success_rate >= settings.parser.min_success_rate)
     report.exit_code = 0 if ok else 1
     log.info("PARSER FINISHED run_id=%s status=%s success=%s errors=%s duration=%.0fs "
              "speed=%s SKU/min", run_id, report.status, report.success, report.error_count,

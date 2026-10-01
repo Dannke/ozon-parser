@@ -160,6 +160,8 @@ def test_run_status():
     assert pipeline.run_status(3, Counter(not_found=1)) == "partial"
     assert pipeline.run_status(0, Counter(fetch_error=2)) == "failed"
     assert pipeline.run_status(3, Counter(interrupted=1)) == "interrupted"
+    # Прогон, остановленный предохранителем, виден в parse_runs отдельно.
+    assert pipeline.run_status(1, Counter(fetch_error=10, blocked=900)) == "blocked"
 
 
 def test_capacity_and_report():

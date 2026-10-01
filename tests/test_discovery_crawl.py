@@ -149,6 +149,7 @@ class FakePage:
     def __init__(self, responses: list):
         self.responses = list(responses)
         self.calls = 0
+        self.sessions = 0
 
     def evaluate(self, script, url):
         self.calls += 1
@@ -173,8 +174,14 @@ def waits(monkeypatch):
 
 
 def source_for(responses, backoff=(10, 60, 180)):
+    """Источник на поддельной вкладке; page.sessions - сколько раз брали новую сессию."""
     page = FakePage(responses)
-    return discovery.ListingSource(cast(Page, page), delay=0.001, jitter=0,
+
+    def new_page():
+        page.sessions += 1
+        return cast(Page, page)
+
+    return discovery.ListingSource(new_page, delay=0.001, jitter=0,
                                    block_backoff=backoff), page
 
 
@@ -188,6 +195,8 @@ def test_403_waits_by_backoff_and_recovers(waits):
     assert items is not None and [c.sku for c in items] == ["123456"]
     assert [w for w in waits["sleeps"] if w >= 1] == [10, 60]
     assert waits["reopens"] == 2
+    # Отказ прилипает к сессии: после каждого ожидания - новая сессия.
+    assert page.sessions == 1 + 2
     assert not source.blocked
 
 
@@ -210,10 +219,11 @@ def test_persistent_block_stops_the_source(waits):
 
 
 def test_ordinary_errors_use_short_retries_not_backoff(waits):
-    source, _ = source_for([PlaywrightError("Execution context was destroyed"),
-                            {"status": 500, "body": ""}, ok()])
+    source, page = source_for([PlaywrightError("Execution context was destroyed"),
+                               {"status": 500, "body": ""}, ok()])
     assert source.fetch(CATEGORY, 5)
     assert all(w < 1 for w in waits["sleeps"]), "обычный сбой не должен ждать минутами"
+    assert page.sessions == 1, "обычный сбой повторяется в той же сессии"
     assert not source.blocked
 
 

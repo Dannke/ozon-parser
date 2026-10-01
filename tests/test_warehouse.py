@@ -177,6 +177,40 @@ def test_parse_lock_is_exclusive_and_stale_runs_are_closed(wh):
     assert wh.run(status) == "interrupted"
 
 
+def test_stale_run_totals_are_recovered_from_per_sku_rows(wh):
+    """Прогон, убитый вместе с компьютером, не остаётся с нулями в итогах."""
+    run_id = wh.start_parse_run("daily", "panel", 1200, 3.0)
+    late = dt.datetime(2026, 9, 30, 20, 19, tzinfo=dt.timezone.utc)
+    wh.record_product(run_id, PRODUCT, late - dt.timedelta(hours=1))
+    wh.record_error(run_id, "111", "fetch_error", "403", 3)
+    wh.record_error(run_id, "222", "fetch_error", "403", 3)
+    assert wh.close_stale_runs() == 1
+
+    def totals(cursor):
+        cursor.execute("SELECT status, success_count, error_count, processed_count "
+                       "FROM parse_runs WHERE run_id = %s", (run_id,))
+        return cursor.fetchone()
+
+    assert wh.run(totals) == ("interrupted", 1, 2, 3)
+
+
+def test_first_connection_failure_is_not_retried(monkeypatch):
+    """Неверный пароль - не «потерянное соединение»: без повтора и без такого лога."""
+    import psycopg2
+
+    attempts: list = []
+
+    def refuse(dsn):
+        attempts.append(dsn)
+        raise psycopg2.OperationalError('password authentication failed for user "user"')
+
+    monkeypatch.setattr(psycopg2, "connect", refuse)
+    store = Warehouse("postgresql://user:secret@127.0.0.1:5433/ozon")
+    with pytest.raises(warehouse.db.DatabaseError, match="password authentication failed"):
+        store.run(lambda cursor: None)
+    assert len(attempts) == 1
+
+
 def test_exported_panel_is_readable_by_legacy_parser(wh):
     """CSV из discover годится для parse_ozon.py --file (старый сценарий)."""
     wh.add_to_panel(picks("111111", "222222"), "phones", "ozon_listing", None)

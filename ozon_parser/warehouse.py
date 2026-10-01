@@ -106,6 +106,30 @@ ON CONFLICT (run_id, sku) DO UPDATE SET
     source = EXCLUDED.source
 """
 
+# Брошенные прогоны: итог восстанавливается по записям каждого SKU, окончание -
+# по последней из них (если записей нет - момент обнаружения).
+STALE_RUNS_UPDATE = """
+UPDATE parse_runs r SET
+    status = 'interrupted',
+    success_count = s.ok,
+    error_count = s.err,
+    processed_count = s.ok + s.err,
+    finished_at = coalesce(r.finished_at, s.last_activity, now()),
+    duration_seconds = round(extract(epoch FROM coalesce(s.last_activity, now())
+                                     - r.started_at)::numeric, 1)
+FROM (
+    SELECT p.run_id,
+           (SELECT count(*) FROM price_history ph WHERE ph.run_id = p.run_id) AS ok,
+           (SELECT count(*) FROM parse_errors pe WHERE pe.run_id = p.run_id) AS err,
+           greatest((SELECT max(collected_at) FROM price_history ph WHERE ph.run_id = p.run_id),
+                    (SELECT max(occurred_at) FROM parse_errors pe WHERE pe.run_id = p.run_id))
+               AS last_activity
+    FROM parse_runs p
+    WHERE p.status = 'running'
+) s
+WHERE r.run_id = s.run_id
+"""
+
 PRODUCT_FIELDS = ("sku", "title", "cover_image", "color", "material", "art_set",
                   "has_rich_content", "photos_seller", "videos_seller")
 PRICE_FIELDS = ("sku", "price", "card_price", "old_price", "discount_pct", "is_available",
@@ -174,11 +198,14 @@ class Warehouse:
     def run(self, operation: Callable[[Any], Any]) -> Any:
         """Выполняет operation(cursor) в транзакции; при обрыве связи - ещё раз."""
         lost = (self._psycopg2.OperationalError, self._psycopg2.InterfaceError)
+        was_connected = self._connection is not None and not self._connection.closed
         try:
             with self.cursor() as cursor:
                 return operation(cursor)
         except db.DatabaseError as exc:
-            if not isinstance(exc.__cause__, lost):
+            # Повтор - только если соединение было и оборвалось. Ошибку первого
+            # подключения (неверный пароль, база не запущена) повтор не лечит.
+            if not was_connected or not isinstance(exc.__cause__, lost):
                 raise
             log.warning("Соединение с PostgreSQL потеряно (%s) - переподключаюсь", exc)
             self.close()
@@ -344,11 +371,13 @@ class Warehouse:
 
         Вызывается только под PARSE_LOCK: раз блокировка наша, живых прогонов
         кроме текущего нет, и всё, что осталось в статусе running, - брошено.
+
+        Брошенный прогон не успел записать итог (так бывает, когда компьютер
+        выключили посреди прогона), поэтому счётчики и время окончания
+        восстанавливаются по строкам, которые он успел записать по каждому SKU.
         """
         def update(cursor) -> int:
-            cursor.execute(
-                "UPDATE parse_runs SET status = 'interrupted', "
-                "finished_at = coalesce(finished_at, now()) WHERE status = 'running'")
+            cursor.execute(STALE_RUNS_UPDATE)
             return cursor.rowcount
         return self.run(update)
 

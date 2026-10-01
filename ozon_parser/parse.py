@@ -327,6 +327,31 @@ class RunProgress:
     failed: list = field(default_factory=list)
     saved: int = 0
     observer: RunObserver = field(default_factory=RunObserver)
+    # Предохранитель: сколько SKU подряд не дали данных и не пора ли остановиться.
+    consecutive_failures: int = 0
+    blocked: bool = False
+
+    def record(self, outcome: SkuOutcome, seconds: float) -> None:
+        """Учитывает итог SKU, передаёт его наблюдателю и следит за серией неудач.
+
+        «Товара нет» (404) серию не продолжает: это ответ сайта, а не отказ.
+        Любой другой SKU без данных её продолжает; на MAX_CONSECUTIVE_FAILURES
+        подряд прогон помечается blocked и дальше не идёт - бить в закрытую
+        дверь часами бессмысленно и вредно для репутации IP.
+        """
+        if outcome.product is None:
+            self.failed.append(outcome.sku)
+        else:
+            self.rows.append(outcome.product)
+        self.notify(outcome, seconds)
+
+        if outcome.product is not None or outcome.error_type == "not_found":
+            self.consecutive_failures = 0
+            return
+        self.consecutive_failures += 1
+        limit = config.MAX_CONSECUTIVE_FAILURES
+        if limit > 0 and self.consecutive_failures >= limit:
+            self.blocked = True
 
     def notify(self, outcome: SkuOutcome, seconds: float) -> None:
         """Передаёт итог SKU наблюдателю. Его сбой не должен ронять прогон."""
@@ -377,12 +402,13 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
                 started = time.monotonic()
                 outcome = parse_sku_outcome(page, sku, config.MAX_RETRIES)
                 progress.pending.pop(0)
-                if outcome.product is None:
-                    progress.failed.append(sku)
-                else:
-                    progress.rows.append(outcome.product)
-                progress.notify(outcome, time.monotonic() - started)
+                progress.record(outcome, time.monotonic() - started)
                 flush_batch()
+                if progress.blocked:
+                    log.error("Ozon не отдаёт данные %s SKU подряд - похоже на блокировку. "
+                              "Прогон остановлен, чтобы не нагружать сайт; осталось SKU: %s",
+                              progress.consecutive_failures, len(progress.pending))
+                    return
 
                 # Пауза между товарами, чтобы не долбить сайт очередью запросов.
                 if progress.pending:
@@ -441,6 +467,10 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
             else:
                 # Со стек-трейсом: сюда попадают и программные ошибки.
                 log.exception("Сессия браузера завершилась аварийно")
+        if progress.blocked:
+            unprocessed = ("blocked", "прогон остановлен: Ozon не отдавал данные {} SKU "
+                           "подряд".format(progress.consecutive_failures))
+            break
         if not progress.pending:
             break
         restarts += 1
@@ -469,7 +499,7 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
     if failed:
         log.warning("Не удалось обработать SKU: %s", ", ".join(failed))
 
-    if not rows:
+    if not rows or progress.blocked:
         return 1
     if min_success_rate > 0 and success_rate < min_success_rate:
         log.error("Доля успеха %.0f%% ниже порога %.0f%% - считаю прогон неудачным",

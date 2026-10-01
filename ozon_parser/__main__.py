@@ -151,15 +151,19 @@ def cmd_benchmark(args, settings: Settings) -> int:
 
 
 def cmd_runs(args, settings: Settings) -> int:
+    # База в контейнере живёт в UTC - время показываем в поясе расписания.
+    tz = scheduler.get_timezone(settings.schedule.timezone)
     with _warehouse() as wh:
         rows = wh.recent_runs(args.limit)
+        print("Время - {}".format(settings.schedule.timezone))
         print("{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
             "run", "kind", "status", "started", "total", "ok", "err", "duration", "SKU/min",
             "s/SKU"))
         for (run_id, kind, status, started, total, ok, err, duration, speed, avg,
              _delay) in rows:
             print("{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
-                run_id, kind, status, started.strftime("%Y-%m-%d %H:%M"), total, ok, err,
+                run_id, kind, status, started.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+                total, ok, err,
                 pipeline.format_duration(float(duration)) if duration is not None else "-",
                 speed if speed is not None else "-", avg if avg is not None else "-"))
         observations, skus, runs = wh.history_counts()
@@ -169,7 +173,7 @@ def cmd_runs(args, settings: Settings) -> int:
 
 
 def cmd_schedule(args, settings: Settings) -> int:
-    # Схему готовим сразу при старте контейнера, а не в 05:30.
+    # Схему готовим сразу при старте контейнера, а не в момент первого прогона.
     with _warehouse():
         pass
     return scheduler.serve(settings, once=args.once)

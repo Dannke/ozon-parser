@@ -1,8 +1,14 @@
-# PostgreSQL + парсер с ежедневным планировщиком.
+# PostgreSQL + парсер.
 #
-#   docker compose up -d                                           # база и планировщик
+#   docker compose up -d                                           # только база
 #   docker compose run --rm parser python -m ozon_parser discover  # сформировать panel
-#   docker compose run --rm parser python -m ozon_parser parse     # прогон вручную
+#
+# Ежедневный парсинг карточек сейчас идёт на хосте (scripts/run_daily.ps1 через
+# Планировщик заданий Windows): 30.09.2026 Chromium в контейнере получал от
+# Ozon HTTP 403 на каждую карточку, а Google Chrome на хосте - нет. Поэтому
+# сервис parser вынесен в профиль и с `up -d` не стартует. Включить
+# контейнерный планировщик, когда браузер в образе будет работать:
+#   docker compose --profile container-scheduler up -d
 #
 # Перед первым запуском:
 #   1. .env: задайте POSTGRES_PASSWORD (см. .env.example);
@@ -32,6 +38,9 @@ services:
 
   parser:
     build: .
+    # Не стартует с `docker compose up -d` (см. шапку файла); `docker compose
+    # run --rm parser ...` работает и без профиля.
+    profiles: ["container-scheduler"]
     restart: unless-stopped
     depends_on:
       postgres:

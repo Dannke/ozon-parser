@@ -83,6 +83,11 @@ MAX_RETRIES = _env_int("MAX_RETRIES", 2)
 # Сколько раз перезапускать браузер, если он упал посреди списка SKU.
 MAX_BROWSER_RESTARTS = _env_int("MAX_BROWSER_RESTARTS", 2)
 
+# Предохранитель: столько SKU подряд без данных (кроме «товара нет», 404) -
+# и прогон останавливается. Так выглядит блокировка Ozon: 30.09.2026 прогон в
+# Docker 5 часов получал 403 на каждый товар. 0 - не останавливаться.
+MAX_CONSECUTIVE_FAILURES = _env_int("MAX_CONSECUTIVE_FAILURES", 10)
+
 # Сколько ждать полной загрузки (load) сверх domcontentloaded, мс.
 LOAD_STATE_TIMEOUT = _env_int("LOAD_STATE_TIMEOUT", 15_000)
 # Пауза после загрузки: Ozon нередко делает ещё один переход сразу после
