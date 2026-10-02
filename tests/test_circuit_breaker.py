@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import contextlib
+from typing import cast
 
 import pytest
+from playwright.sync_api import Page
 
 from ozon_parser import config, parse, session, storage
 from ozon_parser.parse import SkuOutcome
@@ -62,6 +64,7 @@ def scripted(monkeypatch):
     monkeypatch.setattr(parse.browser_utils, "pass_challenge", lambda page, response: True)
     monkeypatch.setattr(parse.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(config, "MAX_CONSECUTIVE_FAILURES", 4)
+    monkeypatch.setattr(config, "MAX_CONSECUTIVE_CHALLENGES", 2)
     calls: list = []
 
     def use(results: dict):
@@ -108,6 +111,56 @@ def test_zero_disables_the_breaker(scripted, monkeypatch):
     monkeypatch.setattr(config, "MAX_CONSECUTIVE_FAILURES", 0)
     parse.run(skus(12), batch_size=0, observer=Recorder())
     assert len(calls) == 12
+
+
+def test_failed_antibot_checks_stop_the_run_sooner(scripted):
+    """Непройденная антибот-проверка - явная блокировка: порог меньше (2, а не 4)."""
+    calls = scripted({"1": "ok", "2": "antibot", "3": "antibot"})
+    observer = Recorder()
+    assert parse.run(skus(10), batch_size=0, observer=observer) == 1
+    assert calls == ["1", "2", "3"]
+    assert [t for _, t in observer.failed] == ["antibot"] * 2 + ["blocked"] * 7
+
+
+def test_antibot_series_is_broken_by_other_outcomes(scripted):
+    # antibot, fetch_error, antibot, ok, antibot - двух проверок подряд нет,
+    # а серия любых неудач (3) не дотягивает до 4.
+    results = {"1": "antibot", "2": "fetch_error", "3": "antibot", "4": "ok", "5": "antibot",
+               "6": "ok"}
+    calls = scripted(results)
+    observer = Recorder()
+    parse.run(skus(6), batch_size=0, observer=observer)
+    assert len(calls) == 6
+    assert not any(t == "blocked" for _, t in observer.failed)
+
+
+def test_failed_antibot_check_is_not_retried(monkeypatch):
+    """Каждая попытка стоит 30 с ожидания - при блокировке повторять тот же SKU незачем."""
+    attempts: list = []
+
+    def blocked_page(page, sku):
+        attempts.append(sku)
+        raise parse.ChallengeFailed("SKU {}: антибот-проверка не прошла".format(sku))
+
+    monkeypatch.setattr(parse, "parse_sku", blocked_page)
+    monkeypatch.setattr(parse.time, "sleep", lambda seconds: None)
+    outcome = parse.parse_sku_outcome(cast(Page, None), "123", retries=2)
+    assert attempts == ["123"]
+    assert (outcome.error_type, outcome.attempts) == ("antibot", 1)
+
+
+def test_ordinary_fetch_errors_are_still_retried(monkeypatch):
+    attempts: list = []
+
+    def flaky(page, sku):
+        attempts.append(sku)
+        raise parse.FetchError("SKU {}: данные карточки не найдены".format(sku))
+
+    monkeypatch.setattr(parse, "parse_sku", flaky)
+    monkeypatch.setattr(parse.time, "sleep", lambda seconds: None)
+    outcome = parse.parse_sku_outcome(cast(Page, None), "123", retries=2)
+    assert len(attempts) == 3
+    assert outcome.error_type == "fetch_error"
 
 
 def test_blocked_run_is_not_restarted_in_a_new_browser(scripted, monkeypatch):

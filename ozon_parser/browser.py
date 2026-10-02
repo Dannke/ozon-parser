@@ -9,17 +9,26 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import time
+from pathlib import Path
 from typing import Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from . import config, constants
+from . import config, constants, logger
 from .logger import get_logger
 
 log = get_logger("browser")
+
+# Снимки непройденной антибот-проверки: чтобы видеть, что именно показал
+# Ozon (капча, бесконечная проверка, заглушка). Не больше N за процесс и не
+# больше M файлов в logs/ - при блокировке страницы идут одна за другой.
+CHALLENGE_SHOTS_PER_PROCESS = 3
+CHALLENGE_SHOTS_KEEP = 20
+_challenge_shots = 0
 
 # Чем пробуем подменить Chromium от Playwright, если он не стартует.
 FALLBACK_CHANNELS = ("msedge", "chrome")
@@ -157,4 +166,38 @@ def pass_challenge(page: Page, response=None, timeout: Optional[int] = None) -> 
             return True
 
     log.warning("Антибот-проверка не прошла за %s с", timeout)
+    save_challenge_snapshot(page)
     return False
+
+
+def save_challenge_snapshot(page: Page, directory: Optional[Path] = None) -> Optional[Path]:
+    """Снимок экрана и текст непройденной проверки - для разбора блокировки.
+
+    Ошибки снимка не мешают работе: это диагностика, а не часть прогона.
+    """
+    global _challenge_shots
+    if _challenge_shots >= CHALLENGE_SHOTS_PER_PROCESS:
+        return None
+    _challenge_shots += 1
+    directory = directory or logger.LOG_DIR
+    path = directory / "challenge-{}.png".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    try:
+        title = page.title()
+        visible = " ".join((page.inner_text("body", timeout=5_000) or "").split())
+    except PlaywrightError:
+        title, visible = "", ""
+    log.warning("Непройденная проверка: url=%s title=%r текст=%r",
+                getattr(page, "url", ""), title, visible[:300])
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(path), full_page=False)
+    except (PlaywrightError, OSError) as exc:
+        log.debug("Снимок проверки не сохранён: %s", exc)
+        return None
+    log.warning("Снимок непройденной проверки: %s", path)
+    for old in sorted(directory.glob("challenge-*.png"))[:-CHALLENGE_SHOTS_KEEP]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return path

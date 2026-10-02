@@ -82,6 +82,15 @@ class FetchError(RuntimeError):
     """Не удалось получить данные страницы (сеть, антибот, таймаут)."""
 
 
+class ChallengeFailed(FetchError):
+    """Антибот-проверка на странице товара не прошла за CHALLENGE_TIMEOUT.
+
+    Обычная проверка проходит сама за 5-10 с. Если она висит дольше, это
+    блокировка (01.10.2026: с этого момента не прошла ни одна страница), и
+    повторять тот же SKU бессмысленно - каждая попытка стоит ещё 30 с.
+    """
+
+
 class BrowserGone(RuntimeError):
     """Браузер закрылся или упал - нужен перезапуск."""
 
@@ -165,7 +174,7 @@ def open_product_page(page: Page, sku: str) -> str:
     if response is not None and response.status == 404:
         raise ProductNotFound("SKU {}: страница вернула HTTP 404".format(sku))
     if not browser_utils.pass_challenge(page, response):
-        raise FetchError("SKU {}: антибот-проверка не прошла".format(sku))
+        raise ChallengeFailed("SKU {}: антибот-проверка не прошла".format(sku))
 
     # Даём странице устояться: сразу после domcontentloaded Ozon нередко делает
     # ещё один переход, и запрос к API падает на уничтоженном контексте.
@@ -241,6 +250,8 @@ def error_type_of(exc: BaseException) -> str:
     """Короткий код ошибки для parse_errors."""
     if isinstance(exc, ProductNotFound):
         return "not_found"
+    if isinstance(exc, ChallengeFailed):
+        return "antibot"
     if isinstance(exc, PlaywrightTimeout):
         return "timeout"
     if isinstance(exc, FetchError):
@@ -276,6 +287,12 @@ def parse_sku_outcome(page: Page, sku: str, retries: int) -> SkuOutcome:
         except ProductNotFound as exc:
             # Повторять бессмысленно - товара просто нет.
             log.error("%s", exc)
+            outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
+            return outcome
+        except ChallengeFailed as exc:
+            # Повторять бессмысленно - это блокировка, а не сбой. Серию таких
+            # отказов ловит предохранитель (MAX_CONSECUTIVE_CHALLENGES).
+            log.error("%s - без повторов", exc)
             outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
             return outcome
         except (FetchError, PlaywrightError) as exc:
@@ -327,8 +344,10 @@ class RunProgress:
     failed: list = field(default_factory=list)
     saved: int = 0
     observer: RunObserver = field(default_factory=RunObserver)
-    # Предохранитель: сколько SKU подряд не дали данных и не пора ли остановиться.
+    # Предохранитель: сколько SKU подряд не дали данных (из них - подряд не
+    # прошли антибот-проверку) и не пора ли остановиться.
     consecutive_failures: int = 0
+    consecutive_challenges: int = 0
     blocked: bool = False
 
     def record(self, outcome: SkuOutcome, seconds: float) -> None:
@@ -337,7 +356,9 @@ class RunProgress:
         «Товара нет» (404) серию не продолжает: это ответ сайта, а не отказ.
         Любой другой SKU без данных её продолжает; на MAX_CONSECUTIVE_FAILURES
         подряд прогон помечается blocked и дальше не идёт - бить в закрытую
-        дверь часами бессмысленно и вредно для репутации IP.
+        дверь часами бессмысленно и вредно для репутации IP. Непройденная
+        антибот-проверка - самый явный признак блокировки, для неё порог
+        меньше: MAX_CONSECUTIVE_CHALLENGES подряд.
         """
         if outcome.product is None:
             self.failed.append(outcome.sku)
@@ -346,11 +367,16 @@ class RunProgress:
         self.notify(outcome, seconds)
 
         if outcome.product is not None or outcome.error_type == "not_found":
-            self.consecutive_failures = 0
+            self.consecutive_failures = self.consecutive_challenges = 0
             return
         self.consecutive_failures += 1
-        limit = config.MAX_CONSECUTIVE_FAILURES
-        if limit > 0 and self.consecutive_failures >= limit:
+        if outcome.error_type == "antibot":
+            self.consecutive_challenges += 1
+        else:
+            self.consecutive_challenges = 0
+        limits = ((config.MAX_CONSECUTIVE_FAILURES, self.consecutive_failures),
+                  (config.MAX_CONSECUTIVE_CHALLENGES, self.consecutive_challenges))
+        if any(0 < limit <= count for limit, count in limits):
             self.blocked = True
 
     def notify(self, outcome: SkuOutcome, seconds: float) -> None:

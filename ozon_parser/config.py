@@ -87,6 +87,10 @@ MAX_BROWSER_RESTARTS = _env_int("MAX_BROWSER_RESTARTS", 2)
 # и прогон останавливается. Так выглядит блокировка Ozon: 30.09.2026 прогон в
 # Docker 5 часов получал 403 на каждый товар. 0 - не останавливаться.
 MAX_CONSECUTIVE_FAILURES = _env_int("MAX_CONSECUTIVE_FAILURES", 10)
+# Отдельный, меньший порог для самого явного признака блокировки - антибот-
+# проверки, которая не прошла за CHALLENGE_TIMEOUT. 01.10.2026 после первой
+# такой не прошла ни одна страница. 0 - не учитывать отдельно.
+MAX_CONSECUTIVE_CHALLENGES = _env_int("MAX_CONSECUTIVE_CHALLENGES", 3)
 
 # Сколько ждать полной загрузки (load) сверх domcontentloaded, мс.
 LOAD_STATE_TIMEOUT = _env_int("LOAD_STATE_TIMEOUT", 15_000)

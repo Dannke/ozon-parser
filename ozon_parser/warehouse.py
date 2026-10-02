@@ -106,6 +106,23 @@ ON CONFLICT (run_id, sku) DO UPDATE SET
     source = EXCLUDED.source
 """
 
+# Очередь парсинга: никогда не пробованные SKU, затем самые давние попытки.
+# Ошибки not_processed / interrupted / blocked - не попытка: до SKU не дошли.
+PANEL_QUEUE = """
+SELECT sp.sku
+FROM sku_panel sp
+LEFT JOIN (
+    SELECT sku, max(collected_at) AS at FROM price_history GROUP BY sku
+) ok ON ok.sku = sp.sku
+LEFT JOIN (
+    SELECT sku, max(occurred_at) AS at FROM parse_errors
+    WHERE error_type NOT IN ('not_processed', 'interrupted', 'blocked')
+    GROUP BY sku
+) err ON err.sku = sp.sku
+{where}
+ORDER BY greatest(ok.at, err.at) ASC NULLS FIRST, md5(sp.sku)
+"""
+
 # Брошенные прогоны: итог восстанавливается по записям каждого SKU, окончание -
 # по последней из них (если записей нет - момент обнаружения).
 STALE_RUNS_UPDATE = """
@@ -258,18 +275,24 @@ class Warehouse:
 
     def panel_skus(self, categories: Optional[Iterable[str]] = None,
                    limit: Optional[int] = None) -> list:
-        """Активные SKU panel для парсинга.
+        """Активные SKU panel для парсинга: дольше всех не обновлявшиеся - первыми.
 
-        Порядок - md5(sku): стабильный от запуска к запуску и перемешанный
-        между категориями. Если прогон оборвётся по таймауту, недобор
-        распределится по категориям равномерно, а не выбьет последнюю целиком.
+        Сначала SKU, которые ещё ни разу не пытались разобрать, затем - по
+        давности последней попытки (успешной или с ошибкой разбора; SKU, до
+        которых прогон просто не дошёл, попыткой не считаются). Если прогоны
+        обрываются на середине - 01.10.2026 Ozon заблокировал парсер на 186-м
+        SKU из 1200, - за несколько дней всё равно обходится вся panel, а не
+        одни и те же первые сотни товаров.
+
+        При равенстве порядок - md5(sku): стабильный и перемешанный между
+        категориями, так что недобор распределяется по ним равномерно.
         """
-        where, params = "WHERE is_active", []
+        where, params = "WHERE sp.is_active", []
         names = list(categories or [])
         if names:
-            where += " AND category = ANY(%s)"
+            where += " AND sp.category = ANY(%s)"
             params.append(names)
-        sql = "SELECT sku FROM sku_panel {} ORDER BY md5(sku)".format(where)
+        sql = PANEL_QUEUE.format(where=where)
         if limit is not None:
             sql += " LIMIT %s"
             params.append(limit)

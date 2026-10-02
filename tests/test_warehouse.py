@@ -194,6 +194,24 @@ def test_stale_run_totals_are_recovered_from_per_sku_rows(wh):
     assert wh.run(totals) == ("interrupted", 1, 2, 3)
 
 
+def test_parse_queue_starts_with_least_recently_attempted(wh):
+    """Обрывающиеся прогоны не должны обходить одни и те же SKU каждый день."""
+    wh.add_to_panel(picks("a", "b", "c", "d", "e"), "phones", "ozon_listing", None)
+    run_id = wh.start_parse_run("daily", "panel", 5, 3.0)
+    day1 = dt.datetime(2026, 10, 1, 15, 0, tzinfo=dt.timezone.utc)
+    wh.record_product(run_id, dict(PRODUCT, sku="a"), day1)                           # успех вчера
+    wh.record_product(run_id, dict(PRODUCT, sku="b"), day1 - dt.timedelta(days=1))    # позавчера
+    wh.record_error(run_id, "c", "antibot", "антибот-проверка не прошла", 1)       # попытка сейчас
+    wh.record_error(run_id, "d", "blocked", "прогон остановлен", None)              # не дошли
+
+    queue = wh.panel_skus()
+    # d и e ещё ни разу не пробовали (blocked - не попытка) - они первые;
+    # затем b (позавчера), a (вчера), c (только что).
+    assert set(queue[:2]) == {"d", "e"}
+    assert queue[2:] == ["b", "a", "c"]
+    assert wh.panel_skus(limit=2) == queue[:2]
+
+
 def test_first_connection_failure_is_not_retried(monkeypatch):
     """Неверный пароль - не «потерянное соединение»: без повтора и без такого лога."""
     import psycopg2
