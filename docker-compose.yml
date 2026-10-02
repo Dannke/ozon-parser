@@ -1,0 +1,69 @@
+# PostgreSQL + парсер.
+#
+#   docker compose up -d                                           # только база
+#   docker compose run --rm parser python -m ozon_parser discover  # сформировать panel
+#
+# Ежедневный парсинг карточек сейчас идёт на хосте (scripts/run_daily.ps1 через
+# Планировщик заданий Windows): 30.09.2026 Chromium в контейнере получал от
+# Ozon HTTP 403 на каждую карточку, а Google Chrome на хосте - нет. Поэтому
+# сервис parser вынесен в профиль и с `up -d` не стартует. Включить
+# контейнерный планировщик, когда браузер в образе будет работать:
+#   docker compose --profile container-scheduler up -d
+#
+# Перед первым запуском:
+#   1. .env: задайте POSTGRES_PASSWORD (см. .env.example);
+#   2. на хосте выполните python get_cookies.py - появятся cookies.json и
+#      token.json. Их нужно создать заранее: если файла нет, Docker вместо
+#      него создаст пустой каталог с тем же именем.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ozon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ozon}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Только на localhost хоста; 5433 - чтобы не конфликтовать с локальным
+    # PostgreSQL на 5432.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  parser:
+    build: .
+    # Не стартует с `docker compose up -d` (см. шапку файла); `docker compose
+    # run --rm parser ...` работает и без профиля.
+    profiles: ["container-scheduler"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    # Перекрывают значения из .env: внутри сети compose база - это сервис
+    # postgres, а браузер - только headless Chromium из образа.
+    environment:
+      PG_DSN: postgresql://${POSTGRES_USER:-ozon}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ozon}
+      HEADLESS: "1"
+      BROWSER_CHANNEL: ""
+      TZ: Europe/Moscow
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Сессия Ozon и доступ к Gmail: контейнер обновляет их сам (ensure_session).
+      - ./cookies.json:/app/cookies.json
+      - ./token.json:/app/token.json
+      - ./credentials.json:/app/credentials.json:ro
+    # Chromium падает на стандартных 64 МБ /dev/shm.
+    shm_size: 1gb
+    command: ["python", "-m", "ozon_parser", "schedule"]
+
+volumes:
+  pgdata:

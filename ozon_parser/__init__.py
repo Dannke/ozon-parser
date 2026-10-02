@@ -5,7 +5,8 @@
 Airflow, где каталог проекта и dags/ оказываются на sys.path одновременно.
 
 Точки входа лежат в корне проекта: ``get_cookies.py``, ``parse_ozon.py``,
-``check_snapshot.py``.
+``check_snapshot.py``. Конвейер discovery -> panel -> parse с хранением в
+PostgreSQL запускается как ``python -m ozon_parser <команда>``.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

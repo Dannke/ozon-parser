@@ -232,6 +232,11 @@ def save(rows: Sequence[dict], backend: str = "", csv_path: Optional[Path] = Non
     backend = (backend or config.STORAGE).lower()
     csv_path = csv_path or config.OUTPUT_CSV
 
+    # Служебный бэкенд конвейера panel: результаты уже записаны в PostgreSQL
+    # по одному SKU (pipeline.py), а экспорт в CSV выключен в config.yaml.
+    if backend == "none":
+        return
+
     if backend == "postgres":
         save_postgres(rows, config.PG_DSN, config.PG_TABLE, snapshot_date)
     elif backend == "clickhouse":

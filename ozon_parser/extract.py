@@ -285,6 +285,53 @@ def extract_price(page_json: dict) -> Optional[float]:
     return None
 
 
+def _exact_widgets(page_json: dict, name: str) -> list:
+    """Состояния виджетов с именем ровно name (webPrice, но не webPriceDecreased...)."""
+    return [state for widget, state in iter_widgets(page_json)
+            if widget == name and isinstance(state, dict)]
+
+
+def extract_offer(page_json: dict) -> dict:
+    """Цена с Ozon Картой, зачёркнутая цена, скидка и наличие.
+
+    Проверено на живых карточках 29.09.2026: виджет webPrice содержит
+    price (обычная цена), cardPrice (с Ozon Картой), originalPrice
+    (зачёркнутая «цена до скидки», если showOriginalPrice) и isAvailable;
+    webSale дублирует наличие в offer.isAvailable. Карточка без остатка
+    приходит с виджетом webOutOfStock.
+    """
+    price_states = _exact_widgets(page_json, "webPrice")
+    state = price_states[0] if price_states else {}
+
+    card_price = to_number(state.get("cardPrice")) or None
+    old_price = None
+    if state.get("showOriginalPrice") is not False:
+        old_price = to_number(state.get("originalPrice")) or None
+
+    if _exact_widgets(page_json, "webOutOfStock"):
+        is_available: Optional[bool] = False
+    elif isinstance(state.get("isAvailable"), bool):
+        is_available = state["isAvailable"]
+    else:
+        is_available = None
+        for sale in _exact_widgets(page_json, "webSale"):
+            offer = sale.get("offer") or {}
+            if isinstance(offer.get("isAvailable"), bool):
+                is_available = offer["isAvailable"]
+                break
+
+    return {"card_price": card_price, "old_price": old_price, "is_available": is_available}
+
+
+def discount_pct(price: Optional[float], old_price: Optional[float]) -> Optional[float]:
+    """Скидка price относительно зачёркнутой цены, % (None - зачёркнутой нет)."""
+    if not price or not old_price:
+        return None
+    if old_price <= price:
+        return 0.0
+    return round((old_price - price) / old_price * 100, 2)
+
+
 def extract_score(page_json: dict) -> tuple:
     """Кортеж (рейтинг, количество отзывов)."""
     rating: Optional[float] = None
@@ -455,12 +502,17 @@ def parse_product(page_json: dict, sku: str) -> dict:
     characteristics = collect_characteristics(page_json)
     rating, reviews_total = extract_score(page_json)
     cover_image, photos_seller, videos_seller = extract_media(page_json)
+    price = extract_price(page_json)
+    offer = extract_offer(page_json)
 
+    # Поля цены сверх FIELDS (card_price, old_price, discount_pct,
+    # is_available) нужны истории цен в PostgreSQL. В CSV и таблицу
+    # ozon_products старого сценария они не попадают: те пишут только FIELDS.
     return {
         "sku": str(sku),
         "source": SOURCE_API,
         "title": extract_title(page_json),
-        "price": extract_price(page_json),
+        "price": price,
         "rating": rating,
         "reviews_total": reviews_total,
         "cover_image": cover_image,
@@ -471,6 +523,8 @@ def parse_product(page_json: dict, sku: str) -> dict:
                                         exclude=MATERIAL_EXCLUDE),
         "art_set": find_characteristic(characteristics, ART_SET_KEYS),
         "has_rich_content": extract_has_rich_content(page_json),
+        **offer,
+        "discount_pct": discount_pct(price, offer["old_price"]),
     }
 
 
@@ -503,4 +557,10 @@ def parse_html(html: str, sku: str) -> dict:
     for field, value in fallbacks.items():
         if product.get(field) is None and value is not None:
             product[field] = value
+
+    # schema.org: availability = https://schema.org/InStock | OutOfStock | ...
+    availability = str(offers.get("availability") or "")
+    if product.get("is_available") is None and availability:
+        product["is_available"] = availability.rstrip("/").endswith("InStock")
+    product["discount_pct"] = discount_pct(product.get("price"), product.get("old_price"))
     return product

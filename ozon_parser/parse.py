@@ -82,6 +82,15 @@ class FetchError(RuntimeError):
     """Не удалось получить данные страницы (сеть, антибот, таймаут)."""
 
 
+class ChallengeFailed(FetchError):
+    """Антибот-проверка на странице товара не прошла за CHALLENGE_TIMEOUT.
+
+    Обычная проверка проходит сама за 5-10 с. Если она висит дольше, это
+    блокировка (01.10.2026: с этого момента не прошла ни одна страница), и
+    повторять тот же SKU бессмысленно - каждая попытка стоит ещё 30 с.
+    """
+
+
 class BrowserGone(RuntimeError):
     """Браузер закрылся или упал - нужен перезапуск."""
 
@@ -165,7 +174,7 @@ def open_product_page(page: Page, sku: str) -> str:
     if response is not None and response.status == 404:
         raise ProductNotFound("SKU {}: страница вернула HTTP 404".format(sku))
     if not browser_utils.pass_challenge(page, response):
-        raise FetchError("SKU {}: антибот-проверка не прошла".format(sku))
+        raise ChallengeFailed("SKU {}: антибот-проверка не прошла".format(sku))
 
     # Даём странице устояться: сразу после domcontentloaded Ozon нередко делает
     # ещё один переход, и запрос к API падает на уничтоженном контексте.
@@ -226,12 +235,40 @@ def parse_sku(page: Page, sku: str) -> dict:
     return product
 
 
-def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]:
-    """Оборачивает parse_sku повторными попытками при временных ошибках.
+@dataclass
+class SkuOutcome:
+    """Итог обработки одного SKU: запись о товаре либо причина неудачи."""
+
+    sku: str
+    product: Optional[dict] = None
+    error_type: str = ""
+    error_message: str = ""
+    attempts: int = 0
+
+
+def error_type_of(exc: BaseException) -> str:
+    """Короткий код ошибки для parse_errors."""
+    if isinstance(exc, ProductNotFound):
+        return "not_found"
+    if isinstance(exc, ChallengeFailed):
+        return "antibot"
+    if isinstance(exc, PlaywrightTimeout):
+        return "timeout"
+    if isinstance(exc, FetchError):
+        return "fetch_error"
+    if isinstance(exc, PlaywrightError):
+        return "browser_error"
+    return type(exc).__name__
+
+
+def parse_sku_outcome(page: Page, sku: str, retries: int) -> SkuOutcome:
+    """Разбирает SKU с повторами при временных ошибках и сообщает, чем кончилось.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
     """
+    outcome = SkuOutcome(sku=sku)
     for attempt in range(1, retries + 2):
+        outcome.attempts = attempt
         try:
             product = parse_sku(page, sku)
             log.info(
@@ -245,14 +282,23 @@ def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]
                 product.get("photos_seller"),
                 product.get("videos_seller"),
             )
-            return product
+            outcome.product = product
+            return outcome
         except ProductNotFound as exc:
             # Повторять бессмысленно - товара просто нет.
             log.error("%s", exc)
-            return None
+            outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
+            return outcome
+        except ChallengeFailed as exc:
+            # Повторять бессмысленно - это блокировка, а не сбой. Серию таких
+            # отказов ловит предохранитель (MAX_CONSECUTIVE_CHALLENGES).
+            log.error("%s - без повторов", exc)
+            outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
+            return outcome
         except (FetchError, PlaywrightError) as exc:
             if isinstance(exc, PlaywrightError) and browser_is_gone(page, exc):
                 raise BrowserGone(str(exc)) from exc
+            outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
             log.warning("SKU %s: попытка %s из %s не удалась: %s",
                         sku, attempt, retries + 1, exc)
             if attempt <= retries:
@@ -261,10 +307,34 @@ def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]
                 time.sleep(pause)
 
     log.error("SKU %s: все попытки исчерпаны, пропускаю", sku)
-    return None
+    return outcome
+
+
+def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]:
+    """Оборачивает parse_sku повторными попытками при временных ошибках.
+
+    :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
+    """
+    return parse_sku_outcome(page, sku, retries).product
 
 
 # --------------------------------------------------------------------- run ---
+class RunObserver:
+    """Хуки на результат каждого SKU. Базовая версия ничего не делает.
+
+    Старый сценарий (CSV / таблица ozon_products) обходится без них; конвейер
+    с PostgreSQL (pipeline.py) через них пишет товар в базу сразу после
+    разбора - до перехода к следующему SKU, а ошибку - в parse_errors.
+    """
+
+    def sku_done(self, sku: str, product: dict, seconds: float) -> None:
+        """SKU разобран."""
+
+    def sku_failed(self, sku: str, error_type: str, message: str, seconds: float,
+                   attempts: int = 0) -> None:
+        """SKU не разобран: товара нет, исчерпаны попытки или до него не дошли."""
+
+
 @dataclass
 class RunProgress:
     """Что собрано за прогон: переживает перезапуски браузера."""
@@ -273,6 +343,52 @@ class RunProgress:
     rows: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     saved: int = 0
+    observer: RunObserver = field(default_factory=RunObserver)
+    # Предохранитель: сколько SKU подряд не дали данных (из них - подряд не
+    # прошли антибот-проверку) и не пора ли остановиться.
+    consecutive_failures: int = 0
+    consecutive_challenges: int = 0
+    blocked: bool = False
+
+    def record(self, outcome: SkuOutcome, seconds: float) -> None:
+        """Учитывает итог SKU, передаёт его наблюдателю и следит за серией неудач.
+
+        «Товара нет» (404) серию не продолжает: это ответ сайта, а не отказ.
+        Любой другой SKU без данных её продолжает; на MAX_CONSECUTIVE_FAILURES
+        подряд прогон помечается blocked и дальше не идёт - бить в закрытую
+        дверь часами бессмысленно и вредно для репутации IP. Непройденная
+        антибот-проверка - самый явный признак блокировки, для неё порог
+        меньше: MAX_CONSECUTIVE_CHALLENGES подряд.
+        """
+        if outcome.product is None:
+            self.failed.append(outcome.sku)
+        else:
+            self.rows.append(outcome.product)
+        self.notify(outcome, seconds)
+
+        if outcome.product is not None or outcome.error_type == "not_found":
+            self.consecutive_failures = self.consecutive_challenges = 0
+            return
+        self.consecutive_failures += 1
+        if outcome.error_type == "antibot":
+            self.consecutive_challenges += 1
+        else:
+            self.consecutive_challenges = 0
+        limits = ((config.MAX_CONSECUTIVE_FAILURES, self.consecutive_failures),
+                  (config.MAX_CONSECUTIVE_CHALLENGES, self.consecutive_challenges))
+        if any(0 < limit <= count for limit, count in limits):
+            self.blocked = True
+
+    def notify(self, outcome: SkuOutcome, seconds: float) -> None:
+        """Передаёт итог SKU наблюдателю. Его сбой не должен ронять прогон."""
+        try:
+            if outcome.product is not None:
+                self.observer.sku_done(outcome.sku, outcome.product, seconds)
+            else:
+                self.observer.sku_failed(outcome.sku, outcome.error_type or "unknown",
+                                         outcome.error_message, seconds, outcome.attempts)
+        except Exception:  # noqa: BLE001 - ошибка записи не повод бросать очередь
+            log.exception("SKU %s: не удалось записать результат", outcome.sku)
 
 
 def save_results(rows: list, backend: str, output: Optional[Path],
@@ -309,13 +425,16 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
                 sku = progress.pending[0]
                 index = total - len(progress.pending) + 1
                 log.info("--- [%s/%s] SKU %s ---", index, total, sku)
-                product = parse_sku_with_retries(page, sku, config.MAX_RETRIES)
+                started = time.monotonic()
+                outcome = parse_sku_outcome(page, sku, config.MAX_RETRIES)
                 progress.pending.pop(0)
-                if product is None:
-                    progress.failed.append(sku)
-                else:
-                    progress.rows.append(product)
+                progress.record(outcome, time.monotonic() - started)
                 flush_batch()
+                if progress.blocked:
+                    log.error("Ozon не отдаёт данные %s SKU подряд - похоже на блокировку. "
+                              "Прогон остановлен, чтобы не нагружать сайт; осталось SKU: %s",
+                              progress.consecutive_failures, len(progress.pending))
+                    return
 
                 # Пауза между товарами, чтобы не долбить сайт очередью запросов.
                 if progress.pending:
@@ -326,7 +445,7 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
 
 def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         snapshot_date: Optional[dt.date] = None, batch_size: Optional[int] = None,
-        min_success_rate: float = 0.0) -> int:
+        min_success_rate: float = 0.0, observer: Optional[RunObserver] = None) -> int:
     """Парсит список SKU и сохраняет результат. Возвращает код возврата процесса.
 
     :param snapshot_date: дата среза для таблиц БД (по умолчанию сегодня).
@@ -334,6 +453,7 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         (0 - только в конце). Промежуточное сохранение безопасно: в БД идёт
         upsert по (sku, parsed_date), CSV переписывается целиком и атомарно.
     :param min_success_rate: минимальная доля успешных SKU от длины входа.
+    :param observer: получает итог каждого SKU сразу после его обработки.
     """
     if not skus:
         log.error("Список SKU пуст")
@@ -346,7 +466,7 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         return 1
 
     batch_size = config.BATCH_SIZE if batch_size is None else batch_size
-    progress = RunProgress(pending=list(skus))
+    progress = RunProgress(pending=list(skus), observer=observer or RunObserver())
     log.info("К обработке SKU: %s", len(skus))
 
     def flush_batch() -> None:
@@ -359,11 +479,13 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
     # связь с драйвером, - собранные строки обязаны дойти до сохранения, а
     # оставшиеся SKU - получить ещё один шанс в новом браузере.
     restarts = 0
+    unprocessed = ("not_processed", "браузер падал, до SKU не дошла очередь")
     while progress.pending:
         try:
             parse_in_browser(progress, state, len(skus), flush_batch)
         except KeyboardInterrupt:
             log.warning("Прервано пользователем - сохраняю собранное")
+            unprocessed = ("interrupted", "прогон прерван до обработки SKU")
             break
         except Exception as exc:  # noqa: BLE001 - теряем браузер, но не данные
             if isinstance(exc, BrowserGone):
@@ -371,6 +493,10 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
             else:
                 # Со стек-трейсом: сюда попадают и программные ошибки.
                 log.exception("Сессия браузера завершилась аварийно")
+        if progress.blocked:
+            unprocessed = ("blocked", "прогон остановлен: Ozon не отдавал данные {} SKU "
+                           "подряд".format(progress.consecutive_failures))
+            break
         if not progress.pending:
             break
         restarts += 1
@@ -382,6 +508,9 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
                     restarts, config.MAX_BROWSER_RESTARTS, len(progress.pending))
 
     # Не обработанные из-за сбоя SKU - тоже неудача.
+    for sku in progress.pending:
+        progress.notify(SkuOutcome(sku=sku, error_type=unprocessed[0],
+                                   error_message=unprocessed[1]), 0.0)
     progress.failed.extend(progress.pending)
 
     # Финальное сохранение делается всегда, даже на пустом результате: иначе
@@ -396,7 +525,7 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
     if failed:
         log.warning("Не удалось обработать SKU: %s", ", ".join(failed))
 
-    if not rows:
+    if not rows or progress.blocked:
         return 1
     if min_success_rate > 0 and success_rate < min_success_rate:
         log.error("Доля успеха %.0f%% ниже порога %.0f%% - считаю прогон неудачным",
@@ -409,12 +538,19 @@ def read_skus_file(path: Path) -> list:
     """Читает список SKU из текстового файла (по одному в строке).
 
     Пустые строки и комментарии (#, в том числе с отступом) пропускаются,
-    дубли убираются с сохранением порядка.
+    дубли убираются с сохранением порядка. Понимает и CSV с заголовком sku
+    (так выгружает panel команда discover): берётся первый столбец, строка
+    заголовка пропускается.
     """
     if not path.exists():
         raise FileNotFoundError("Файл со списком SKU не найден: {}".format(path))
-    lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
-    return list(dict.fromkeys(line for line in lines if line and not line.startswith("#")))
+    # utf-8-sig: CSV, сохранённый из Excel, начинается с BOM.
+    lines = (line.split(",", 1)[0].strip()
+             for line in path.read_text(encoding="utf-8-sig").splitlines())
+    return list(dict.fromkeys(
+        line for line in lines
+        if line and not line.startswith("#") and line.lower() != "sku"
+    ))
 
 
 def select_range(skus: list, offset: int = 0, limit: Optional[int] = None) -> list:

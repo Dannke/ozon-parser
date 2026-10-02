@@ -8,7 +8,7 @@
 Каждая проверка работает в своём контексте браузера, чтобы подменённые
 маршруты одной не влияли на другую.
 
-Нужен установленный браузер (см. README) - без него браузерные проверки
+Нужен установленный браузер (см. docs/installation.md) - без него браузерные проверки
 пропускаются, а не падают. Запуск:
 
     pytest tests/test_pipeline.py
@@ -139,7 +139,7 @@ def browser():
         except Exception as exc:  # noqa: BLE001 - драйвер бросает разные классы
             _PLAYWRIGHT.stop()
             _PLAYWRIGHT = None
-            pytest.skip("браузер не запустился ({}). См. README: "
+            pytest.skip("браузер не запустился ({}). См. docs/installation.md: "
                         "python -m playwright install chromium".format(exc))
         atexit.register(_shutdown)
     return _BROWSER

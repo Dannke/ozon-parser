@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ozon-parser"
-version = "1.1.0"
-description = "Парсер карточек товаров ozon.ru с ежедневной выгрузкой в CSV / PostgreSQL / ClickHouse"
+version = "1.2.0"
+description = "Конвейер discovery -> SKU panel -> ежедневный парсинг ozon.ru -> PostgreSQL (история цен)"
 requires-python = ">=3.9"
 dependencies = [
     "playwright==1.63.0",
@@ -13,6 +13,10 @@ dependencies = [
     "google-auth==2.35.0",
     "google-auth-oauthlib==1.2.1",
     "python-dotenv==1.0.1",
+    # config.yaml конвейера (discovery, panel, расписание).
+    "PyYAML==6.0.2",
+    # База часовых поясов для zoneinfo: на Windows и в slim-образах её нет.
+    "tzdata==2025.2",
 ]
 
 # Драйверы БД нужны только соответствующему бэкенду, поэтому вынесены сюда:
@@ -33,9 +37,14 @@ dev = [
 ozon-parse = "ozon_parser.parse:main"
 ozon-login = "ozon_parser.login:main"
 ozon-check = "ozon_parser.check:main"
+ozon-pipeline = "ozon_parser.__main__:main"
 
 [tool.setuptools]
 packages = ["ozon_parser"]
+
+[tool.setuptools.package-data]
+# Миграции схемы применяются из пакета (ozon_parser.warehouse.migrate).
+ozon_parser = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

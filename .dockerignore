@@ -1,0 +1,18 @@
+# Секреты: подключаются томами при запуске, в образ не попадают.
+.env
+cookies.json
+token.json
+credentials.json
+
+# Окружение, кэши, результаты
+.git/
+.venv/
+.vscode/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+data/
+logs/
+*.tmp
