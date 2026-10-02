@@ -8,6 +8,7 @@
   - [Контейнерный планировщик](#контейнерный-планировщик)
   - [Airflow](#airflow)
 - [Мониторинг](#мониторинг)
+- [Доступ для аналитики: роль только для чтения](#доступ-для-аналитики-роль-только-для-чтения)
 - [Логи](#логи)
 - [Предохранитель](#предохранитель)
 - [Docker](#docker)
@@ -122,6 +123,41 @@ python -m ozon_parser runs
 вручную (`python -m ozon_parser parse`) или разовой задачей Windows с тем же
 действием, что у `OzonParserDaily`. Состав panel — `python -m ozon_parser panel`. Для
 аналитики — представления из [data-model.md](data-model.md).
+
+## Доступ для аналитики: роль только для чтения
+
+Для BI-инструментов (DataLens, DBeaver, Jupyter) в базе заведена роль
+`analyst`: читает все таблицы и представления схемы `public`, ничего в них не
+меняет, а свои представления и таблицы создаёт в собственной схеме
+`analytics`. Парсер по-прежнему работает под `ozon`.
+
+Роль создаётся один раз вручную (пароль не хранится в репозитории). Повторить
+нужно, только если том `pgdata` пересоздан:
+
+```bash
+docker compose exec -T postgres psql -U ozon -d ozon -v ON_ERROR_STOP=1
+```
+
+```sql
+BEGIN;
+CREATE ROLE analyst LOGIN PASSWORD '<пароль>';
+GRANT CONNECT ON DATABASE ozon TO analyst;
+GRANT USAGE ON SCHEMA public TO analyst;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO analyst;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analyst;
+CREATE SCHEMA analytics AUTHORIZATION analyst;
+COMMIT;
+```
+
+- `ALTER DEFAULT PRIVILEGES` действует на объекты, которые создаёт `ozon`, —
+  то есть и на таблицы и представления будущих миграций: доступ к ним
+  появится сам.
+- Подключение: хост `127.0.0.1`, порт `5433`, база `ozon`, пользователь
+  `analyst`. База слушает только localhost этой машины.
+- Проверено 02.10.2026: чтение `price_history` и `v_price_daily` работает;
+  `INSERT` / `DELETE` в таблицы `public` и `CREATE TABLE` в `public` —
+  `permission denied`; представление в `analytics` создаётся; новая таблица,
+  созданная `ozon`, сразу читается под `analyst`.
 
 ## Логи
 
