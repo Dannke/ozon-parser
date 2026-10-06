@@ -111,3 +111,21 @@ def test_invalid_block_backoff(backoff):
 def test_unknown_category_name():
     with pytest.raises(SettingsError, match="нет в конфигурации"):
         parse_settings(VALID).category("tv")
+
+
+def test_block_retry_defaults_and_limits():
+    """Повтор после блокировки включён по умолчанию, но не чаще раза в полчаса."""
+    schedule = parse_settings(VALID).schedule
+    assert (schedule.block_retries, schedule.block_retry_delay_hours) == (1, 3.0)
+
+    data = copy.deepcopy(VALID)
+    data["schedule"].update(block_retries=0, block_retry_delay_hours=1.5)
+    custom = parse_settings(data).schedule
+    assert (custom.block_retries, custom.block_retry_delay_hours) == (0, 1.5)
+
+    for key, value in [("block_retries", 5), ("block_retries", -1),
+                       ("block_retry_delay_hours", 0.1)]:
+        data = copy.deepcopy(VALID)
+        data["schedule"][key] = value
+        with pytest.raises(SettingsError, match=key):
+            parse_settings(data)

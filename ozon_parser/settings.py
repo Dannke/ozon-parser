@@ -101,6 +101,8 @@ class ScheduleSettings:
     ensure_session: bool = True
     session_max_age_days: int = 14
     parse_timeout_hours: float = 10.0
+    block_retries: int = 1
+    block_retry_delay_hours: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,11 @@ def parse_settings(data: Any, path: Optional[Path] = None) -> Settings:
                                          where="schedule."),
             parse_timeout_hours=_float(schedule, "parse_timeout_hours", 10.0, minimum=0.1,
                                         where="schedule."),
+            block_retries=_int(schedule, "block_retries", 1, minimum=0, maximum=3,
+                                  where="schedule."),
+            # Меньше получаса - уже не «переждать блокировку», а долбить Ozon.
+            block_retry_delay_hours=_float(schedule, "block_retry_delay_hours", 3.0,
+                                            minimum=0.5, maximum=12, where="schedule."),
         ),
         benchmark=BenchmarkSettings(
             sample_size=_int(benchmark, "sample_size", 50, minimum=1,

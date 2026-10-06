@@ -33,6 +33,11 @@ log = get_logger("pipeline")
 # blocked - прогон остановлен предохранителем (Ozon отказывал SKU подряд).
 NOT_ATTEMPTED = ("not_processed", "interrupted", "blocked")
 
+# Код выхода parse, если прогон остановил предохранитель. Планировщик по нему
+# отличает блокировку Ozon (имеет смысл повторить через несколько часов) от
+# прочих неудач (повтор не поможет).
+EXIT_BLOCKED = 3
+
 
 class ParseLockBusy(RuntimeError):
     """Уже идёт другой прогон парсера."""
@@ -173,7 +178,7 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
 
     ok = (report.success > 0 and report.status != "blocked"
           and report.success_rate >= settings.parser.min_success_rate)
-    report.exit_code = 0 if ok else 1
+    report.exit_code = 0 if ok else EXIT_BLOCKED if report.status == "blocked" else 1
     log.info("PARSER FINISHED run_id=%s status=%s success=%s errors=%s duration=%.0fs "
              "speed=%s SKU/min", run_id, report.status, report.success, report.error_count,
              duration, "{:.2f}".format(speed) if speed else "-")

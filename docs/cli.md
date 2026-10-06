@@ -20,7 +20,7 @@ python -m ozon_parser [--config PATH] <команда> [флаги]
 | `migrate`   | — | Применить миграции схемы (делается и автоматически) |
 | `discover`  | `--category NAME` (можно повторять), `--rebuild` | Найти SKU и дописать `sku_panel` до `panel_size` каждой категории. `--rebuild` пересобирает panel заново: старая выключается (`is_active = false`) |
 | `panel`     | `--export PATH` | Состав panel по категориям и группам; `--export` выгружает активные SKU в CSV |
-| `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик |
+| `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily`, `--missing-today` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик. `--missing-today` — только SKU panel, у которых за сегодня (по `schedule.timezone`) ещё нет успешного наблюдения: догон после блокировки; если таких нет — код 0 без прогона |
 | `benchmark` | `--sample N`, `--seed S`, `--file PATH` | Замер скорости на случайных SKU panel (или из файла) и расчёт дневной ёмкости |
 | `runs`      | `--limit N` (10) | Последние прогоны и объём истории |
 | `schedule`  | `--once` | Ежедневный прогон: без флага — цикл до `daily_at` (контейнер), `--once` — выполнить прогон сейчас и выйти |
@@ -33,6 +33,10 @@ python -m ozon_parser discover --category coffee_machines
 
 ```bash
 python -m ozon_parser parse --category phone_cases --limit 20
+```
+
+```bash
+python -m ozon_parser parse --kind daily --missing-today
 ```
 
 ```bash
@@ -115,9 +119,13 @@ powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
 `0` — успех. `1` — ошибка или неполный результат:
 
 - `discover` — хотя бы одна категория не собрана до `panel_size`;
-- `parse` — нет успешных SKU, доля успеха ниже `parser.min_success_rate` или
-  сработал предохранитель;
+- `parse` — нет успешных SKU или доля успеха ниже `parser.min_success_rate`;
 - `benchmark` — ни одного успешного SKU;
 - ошибки настроек, подключения к PostgreSQL, параллельный прогон.
+
+`2` — `parse --missing-today` вместе со списком SKU или `--file`.
+
+`3` — `parse`: сработал предохранитель, прогон в статусе `blocked`. По этому
+коду ежедневная задача повторяет прогон через `schedule.block_retry_delay_hours`.
 
 `130` — прервано по Ctrl+C.

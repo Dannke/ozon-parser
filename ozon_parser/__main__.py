@@ -15,6 +15,7 @@ check_snapshot.py работают как раньше и не требуют н
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 from pathlib import Path
 
@@ -109,7 +110,12 @@ def cmd_panel(args, settings: Settings) -> int:
     return 0
 
 
-def _skus_for_parse(args, wh: Warehouse) -> tuple:
+def _today_start(settings: Settings) -> dt.datetime:
+    tz = scheduler.get_timezone(settings.schedule.timezone)
+    return scheduler.day_start(dt.datetime.now(dt.timezone.utc), tz)
+
+
+def _skus_for_parse(args, wh: Warehouse, settings: Settings) -> tuple:
     """(список SKU, откуда он взят)."""
     from .parse import read_skus_file, select_range
 
@@ -118,13 +124,21 @@ def _skus_for_parse(args, wh: Warehouse) -> tuple:
     elif args.file:
         skus, source = read_skus_file(args.file), "file"
     else:
-        skus, source = wh.panel_skus(args.category), "panel"
+        since = _today_start(settings) if args.missing_today else None
+        skus, source = wh.panel_skus(args.category, missing_since=since), "panel"
     return select_range(skus, 0, args.limit), source
 
 
 def cmd_parse(args, settings: Settings) -> int:
+    if args.missing_today and (args.skus or args.file):
+        log.error("--missing-today работает только с panel, без списка SKU и --file")
+        return 2
     with _warehouse() as wh:
-        skus, source = _skus_for_parse(args, wh)
+        skus, source = _skus_for_parse(args, wh, settings)
+        if not skus and args.missing_today and wh.panel_skus(args.category, limit=1):
+            log.info("Все SKU panel за сегодня уже собраны - парсить нечего")
+            print("Все SKU panel за сегодня уже собраны")
+            return 0
         if not skus:
             log.error("Нет SKU для парсинга (%s). Сначала: python -m ozon_parser discover",
                       source)
@@ -206,6 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
     parse.add_argument("--limit", type=int, help="обработать не больше N SKU")
     parse.add_argument("--kind", choices=["manual", "daily"], default="manual",
                        help="тип прогона в parse_runs (планировщик передаёт daily)")
+    parse.add_argument("--missing-today", action="store_true",
+                       help="только SKU panel, у которых за сегодня (schedule.timezone) ещё "
+                            "нет успешного наблюдения - догон после блокировки")
     parse.set_defaults(func=cmd_parse)
 
     bench = commands.add_parser("benchmark", help="замер скорости парсера")

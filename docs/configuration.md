@@ -134,10 +134,14 @@
 | `run_on_start`         | `false`         | Контейнерный планировщик: прогнать сразу при старте |
 | `ensure_session`       | `true`          | Перед парсингом проверить сессию и при необходимости войти заново |
 | `session_max_age_days` | `14`            | Старше скольких дней сессия перевыпускается |
-| `parse_timeout_hours`  | `10`            | Жёсткий предел длительности прогона |
+| `parse_timeout_hours`  | `10`            | Жёсткий предел длительности ежедневного прогона вместе с повтором |
+| `block_retries`        | `1`             | Сколько раз повторить прогон, остановленный блокировкой Ozon (`blocked`); `0` — не повторять, максимум 3 |
+| `block_retry_delay_hours` | `3`          | Через сколько часов повтор (от 0,5 до 12). Повтор берёт только SKU, которых за сегодня ещё нет, и не начинается, если до конца `parse_timeout_hours` меньше часа |
 
-После изменения `daily_at` перезапустите `scripts/register_windows_task.ps1`
-(см. [operations.md](operations.md#планировщик-заданий-windows)).
+После изменения `daily_at` или `parse_timeout_hours` перезапустите
+`scripts/register_windows_task.ps1` (см.
+[operations.md](operations.md#планировщик-заданий-windows)). Как работает
+повтор — [operations.md](operations.md#повтор-после-блокировки).
 
 ### benchmark
 
