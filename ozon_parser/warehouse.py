@@ -274,7 +274,8 @@ class Warehouse:
         return self.run(query)
 
     def panel_skus(self, categories: Optional[Iterable[str]] = None,
-                   limit: Optional[int] = None) -> list:
+                   limit: Optional[int] = None,
+                   missing_since: Optional[dt.datetime] = None) -> list:
         """Активные SKU panel для парсинга: дольше всех не обновлявшиеся - первыми.
 
         Сначала SKU, которые ещё ни разу не пытались разобрать, затем - по
@@ -286,12 +287,18 @@ class Warehouse:
 
         При равенстве порядок - md5(sku): стабильный и перемешанный между
         категориями, так что недобор распределяется по ним равномерно.
+
+        missing_since - только SKU без успешного наблюдения с этого момента:
+        повтор после блокировки добирает недостающее, а не обходит panel заново.
         """
         where, params = "WHERE sp.is_active", []
         names = list(categories or [])
         if names:
             where += " AND sp.category = ANY(%s)"
             params.append(names)
+        if missing_since is not None:
+            where += " AND (ok.at IS NULL OR ok.at < %s)"
+            params.append(missing_since)
         sql = PANEL_QUEUE.format(where=where)
         if limit is not None:
             sql += " LIMIT %s"

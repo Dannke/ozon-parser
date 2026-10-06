@@ -13,7 +13,9 @@
 #   * если в назначенное время компьютер был выключен, запускается при
 #     первой возможности (StartWhenAvailable);
 #   * не запускается второй раз, пока идёт предыдущий прогон; жёсткий
-#     предел - 10 часов.
+#     предел - schedule.parse_timeout_hours + 1 час. Прогон вместе с повтором
+#     после блокировки сам укладывается в parse_timeout_hours, лимит Windows -
+#     страховка на случай зависания.
 #
 # Удалить задачу:  Unregister-ScheduledTask -TaskName OzonParserDaily
 
@@ -34,10 +36,11 @@ s = load_settings()
 target = next_run_at(dt.datetime.now(dt.timezone.utc), s.schedule.daily_at,
                      get_timezone(s.schedule.timezone))
 print(target.astimezone().strftime('%H:%M'), s.schedule.daily_at.strftime('%H:%M'),
-      s.schedule.timezone)
+      s.schedule.timezone, int(s.schedule.parse_timeout_hours * 60) + 60)
 "@
 $parts = (& $python -c $code).Trim().Split(" ")
 $localTime, $configTime, $configZone = $parts[0], $parts[1], $parts[2]
+$limitMinutes = [int]$parts[3]
 
 $script = Join-Path $root "scripts\run_daily.ps1"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
@@ -45,7 +48,7 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Daily -At $localTime
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 10) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes $limitMinutes) `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType Interactive -RunLevel Limited
@@ -55,5 +58,5 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Description "Ozon price panel: daily parse ($configTime $configZone)" | Out-Null
 
 $info = Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo
-"Task '$TaskName': daily at $localTime local time = $configTime $configZone"
+"Task '$TaskName': daily at $localTime local time = $configTime $configZone, limit $limitMinutes min"
 "Next run: $($info.NextRunTime)"

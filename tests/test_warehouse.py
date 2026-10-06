@@ -212,6 +212,20 @@ def test_parse_queue_starts_with_least_recently_attempted(wh):
     assert wh.panel_skus(limit=2) == queue[:2]
 
 
+def test_parse_queue_can_skip_skus_collected_since(wh):
+    """Повтор после блокировки добирает только то, чего за день ещё нет."""
+    wh.add_to_panel(picks("a", "b", "c"), "phones", "ozon_listing", None)
+    run_id = wh.start_parse_run("daily", "panel", 3, 3.0)
+    today = dt.datetime(2026, 10, 5, 6, 0, tzinfo=dt.timezone.utc)
+    wh.record_product(run_id, dict(PRODUCT, sku="a"), today)                          # сегодня
+    wh.record_product(run_id, dict(PRODUCT, sku="b"), today - dt.timedelta(days=1))   # вчера
+    wh.record_error(run_id, "c", "antibot", "антибот-проверка не прошла", 1)       # ошибка
+    midnight = dt.datetime(2026, 10, 4, 21, 0, tzinfo=dt.timezone.utc)                # 00:00 МСК
+    assert set(wh.panel_skus(missing_since=midnight)) == {"b", "c"}
+    assert set(wh.panel_skus(["phones"], missing_since=midnight)) == {"b", "c"}
+    assert len(wh.panel_skus()) == 3
+
+
 def test_first_connection_failure_is_not_retried(monkeypatch):
     """Неверный пароль - не «потерянное соединение»: без повтора и без такого лога."""
     import psycopg2

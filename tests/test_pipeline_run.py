@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 from pathlib import Path
 
@@ -123,6 +124,15 @@ def test_crashed_browser_leaves_skus_as_not_processed(monkeypatch):
     assert report.exit_code == 1
 
 
+def test_blocked_run_has_its_own_exit_code(monkeypatch):
+    """Планировщик по коду выхода решает, повторять ли прогон позже."""
+    monkeypatch.setattr(parse, "parse_in_browser",
+                        scripted_browser({"2": "antibot", "3": "blocked"}))
+    report = pipeline.run_parse(FakeWarehouse(), ["1", "2", "3"], SETTINGS)
+    assert report.status == "blocked"
+    assert report.exit_code == pipeline.EXIT_BLOCKED != 1
+
+
 def test_missing_session_is_visible_in_run_accounting(monkeypatch):
     """parse.run выходит сразу, но SKU не пропадают из учёта молча."""
     def no_session(path):
@@ -177,3 +187,54 @@ def test_panel_csv_with_header_is_read_by_legacy_reader():
         assert parse.read_skus_file(path) == ["111111", "222222"]
         path.write_text("sku,category\n111111,phones\n", encoding="utf-8")
         assert parse.read_skus_file(path) == ["111111"]
+
+
+class QueueWarehouse(FakeWarehouse):
+    """panel_skus как в базе: missing_since убирает SKU, собранные сегодня."""
+
+    def __init__(self, panel, collected_today=()):
+        super().__init__()
+        self.panel = list(panel)
+        self.collected_today = set(collected_today)
+        self.since = None
+
+    def panel_skus(self, categories=None, limit=None, missing_since=None):
+        self.since = missing_since or self.since
+        skus = [s for s in self.panel
+                if missing_since is None or s not in self.collected_today]
+        return skus[:limit] if limit is not None else skus
+
+    def migrate(self):
+        return []
+
+    def close(self):
+        pass
+
+
+def run_cli(monkeypatch, wh, *argv):
+    from ozon_parser import __main__ as cli
+
+    monkeypatch.setattr(cli, "Warehouse", lambda: wh)
+    monkeypatch.setattr(cli, "load_settings", lambda path: SETTINGS)
+    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}))
+    return cli.main(["parse", *argv])
+
+
+def test_missing_today_parses_only_what_is_not_collected(monkeypatch):
+    wh = QueueWarehouse(["1", "2", "3"], collected_today={"2"})
+    assert run_cli(monkeypatch, wh, "--kind", "daily", "--missing-today") == 0
+    assert wh.products == ["1", "3"]
+    assert wh.runs[1]["total"] == 2
+    # Граница - полночь по поясу расписания.
+    assert wh.since is not None and wh.since.utcoffset() == dt.timedelta(hours=3)
+    assert (wh.since.hour, wh.since.minute) == (0, 0)
+
+
+def test_missing_today_with_everything_collected_is_success(monkeypatch):
+    wh = QueueWarehouse(["1", "2"], collected_today={"1", "2"})
+    assert run_cli(monkeypatch, wh, "--missing-today") == 0
+    assert wh.runs == {}
+
+
+def test_missing_today_needs_panel(monkeypatch):
+    assert run_cli(monkeypatch, QueueWarehouse(["1"]), "--missing-today", "1") == 2

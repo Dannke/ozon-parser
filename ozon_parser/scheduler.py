@@ -5,6 +5,12 @@
 
     ensure_session  ->  parse (panel)
 
+Если Ozon остановил прогон (parse вышел с кодом EXIT_BLOCKED), прогон
+повторяется через schedule.block_retry_delay_hours, не больше
+schedule.block_retries раз. Повтор берёт только SKU, у которых за текущий день
+ещё нет наблюдения (parse --missing-today), а весь прогон с повторами
+укладывается в schedule.parse_timeout_hours.
+
 Каждый шаг - отдельный процесс. Браузер и драйвер Playwright умирают вместе
 с процессом прогона, так что утечка памяти или зависший Chromium не
 накапливаются от ночи к ночи, а сам планировщик остаётся лёгким. Прогоны идут
@@ -24,6 +30,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import config
 from .logger import get_logger
+from .pipeline import EXIT_BLOCKED
 from .settings import Settings
 
 log = get_logger("scheduler")
@@ -31,6 +38,10 @@ log = get_logger("scheduler")
 # Спим короткими отрезками: так планировщик быстро реагирует на остановку
 # контейнера и не «проспит» запуск после перевода системных часов.
 SLEEP_STEP_SECONDS = 60
+
+# Повтор не начинается, если до конца отведённого прогону времени остаётся
+# меньше часа: столько нужно, чтобы успеть собрать хоть сколько-то SKU.
+MIN_RETRY_WINDOW_SECONDS = 3600
 
 
 def get_timezone(name: str) -> dt.tzinfo:
@@ -52,6 +63,11 @@ def next_run_at(now: dt.datetime, daily_at: dt.time, tz: dt.tzinfo) -> dt.dateti
     return candidate
 
 
+def day_start(now: dt.datetime, tz: dt.tzinfo) -> dt.datetime:
+    """Начало текущего дня в поясе tz - граница дня наблюдения."""
+    return dt.datetime.combine(now.astimezone(tz).date(), dt.time(0), tzinfo=tz)
+
+
 def job_commands(settings: Settings) -> list:
     """Шаги ежедневного прогона: (название, команда)."""
     python = sys.executable
@@ -60,28 +76,65 @@ def job_commands(settings: Settings) -> list:
         steps.append(("ensure_session", [
             python, str(config.BASE_DIR / "get_cookies.py"), "--non-interactive",
             "--max-age-days", str(settings.schedule.session_max_age_days)]))
-    steps.append(("parse", [python, "-m", "ozon_parser", "parse", "--kind", "daily"]))
+    steps.append(("parse", [python, "-m", "ozon_parser", "parse", "--kind", "daily",
+                            "--missing-today"]))
     return steps
 
 
-def run_job(settings: Settings) -> int:
-    """Один ежедневный прогон. Возвращает код возврата шага parse."""
-    timeout = settings.schedule.parse_timeout_hours * 3600
+def _clock_time(timestamp: float, settings: Settings) -> str:
+    """Время для лога в поясе расписания (в контейнере системный пояс - UTC)."""
+    tz = get_timezone(settings.schedule.timezone)
+    return dt.datetime.fromtimestamp(timestamp, tz).strftime("%H:%M %Z")
+
+
+def _sleep_until(target: float, clock, sleep) -> None:
+    while clock() < target:
+        sleep(min(SLEEP_STEP_SECONDS, max(target - clock(), 0)))
+
+
+def _run_steps(settings: Settings, deadline: float, clock) -> int:
+    """Шаги прогона по очереди. Возвращает код возврата шага parse."""
     code = 1
     for name, command in job_commands(settings):
+        timeout = max(deadline - clock(), 1)
         log.info("Шаг %s: %s", name, " ".join(command[1:]))
         started = time.monotonic()
         try:
             code = subprocess.run(command, cwd=str(config.BASE_DIR), timeout=timeout,
                                   check=False).returncode
         except subprocess.TimeoutExpired:
-            log.error("Шаг %s не уложился в %.1f ч и остановлен", name, timeout / 3600)
+            log.error("Шаг %s не уложился в отведённое время (до %s) и остановлен", name,
+                      _clock_time(deadline, settings))
             code = 1
         log.info("Шаг %s завершён с кодом %s за %.0f с", name, code, time.monotonic() - started)
         if name == "ensure_session" and code != 0:
             # Карточки ozon.ru открываются и без входа: прогон всё равно
             # запускаем, а проблема с сессией видна в логе и в parse_runs.
             log.warning("Сессию обновить не удалось - запускаю парсинг с имеющейся")
+    return code
+
+
+def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
+    """Один ежедневный прогон с повторами после блокировки.
+
+    Возвращает код возврата последнего шага parse.
+    """
+    schedule = settings.schedule
+    deadline = clock() + schedule.parse_timeout_hours * 3600
+    code = _run_steps(settings, deadline, clock)
+    for attempt in range(1, schedule.block_retries + 1):
+        if code != EXIT_BLOCKED:
+            break
+        retry_at = clock() + schedule.block_retry_delay_hours * 3600
+        if deadline - retry_at < MIN_RETRY_WINDOW_SECONDS:
+            log.warning("Прогон остановлен блокировкой Ozon; на повтор не хватает времени "
+                        "(schedule.parse_timeout_hours=%s) - SKU доберёт следующий прогон",
+                        schedule.parse_timeout_hours)
+            break
+        log.warning("Прогон остановлен блокировкой Ozon - повтор %s из %s в %s",
+                    attempt, schedule.block_retries, _clock_time(retry_at, settings))
+        _sleep_until(retry_at, clock, sleep)
+        code = _run_steps(settings, deadline, clock)
     return code
 
 
@@ -100,7 +153,6 @@ def serve(settings: Settings, once: bool = False, clock=time.time) -> int:
         now = dt.datetime.fromtimestamp(clock(), dt.timezone.utc)
         target = next_run_at(now, settings.schedule.daily_at, tz)
         log.info("Следующий прогон: %s", target.isoformat(timespec="minutes"))
-        while clock() < target.timestamp():
-            time.sleep(min(SLEEP_STEP_SECONDS, max(target.timestamp() - clock(), 0)))
+        _sleep_until(target.timestamp(), clock, time.sleep)
         run_job(settings)
 

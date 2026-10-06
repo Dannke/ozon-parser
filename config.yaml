@@ -114,8 +114,16 @@ schedule:
   # (get_cookies.py --non-interactive), как задача ensure_session в Airflow.
   ensure_session: true
   session_max_age_days: 14
-  # Жёсткий предел длительности одного прогона.
+  # Жёсткий предел длительности ежедневного прогона вместе с повторами.
+  # Совпадает с лимитом задачи Windows (scripts/register_windows_task.ps1).
   parse_timeout_hours: 10
+  # Если Ozon остановил прогон капчей или отказами (статус blocked), через
+  # block_retry_delay_hours часов прогон повторяется: только SKU, которых за
+  # сегодня ещё нет. Не больше block_retries раз и только если до конца
+  # parse_timeout_hours остаётся не меньше часа. 0 - не повторять.
+  # 05.10.2026 капча остановила прогон на 348-м SKU, 01.10 - на 185-м.
+  block_retries: 1
+  block_retry_delay_hours: 3
 
 benchmark:
   # Сколько случайных SKU из panel парсить при замере скорости.
