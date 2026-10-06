@@ -20,9 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from . import config
+from . import config, constants
 
 DEFAULT_PATH = config.BASE_DIR / "config.yaml"
+DEFAULT_BACKUP_DIR = config.BASE_DIR / "backups"
 
 SOURCE_OZON_LISTING = "ozon_listing"
 SOURCE_DATA_OZON = "data_ozon"
@@ -91,6 +92,21 @@ class DiscoverySettings:
 class ParserSettings:
     csv_export: Optional[Path] = None
     min_success_rate: float = 0.0
+    # Откуда брать цену: api - внутренний API, как старый сценарий; html -
+    # JSON, встроенный в HTML карточки (API остаётся запасным путём).
+    price_source: str = constants.PRICE_SOURCE_API
+    # Раз в сколько дней запрашивать описание и полные характеристики
+    # (вторую часть карточки): 1 - каждый день, 0 - только у SKU без них.
+    details_refresh_days: int = 1
+
+
+@dataclass(frozen=True)
+class BackupSettings:
+    """Резервная копия базы после ежедневного прогона (backup.py)."""
+
+    enabled: bool = False
+    directory: Path = DEFAULT_BACKUP_DIR
+    keep: int = 14
 
 
 @dataclass(frozen=True)
@@ -118,6 +134,7 @@ class Settings:
     parser: ParserSettings = field(default_factory=ParserSettings)
     schedule: ScheduleSettings = field(default_factory=ScheduleSettings)
     benchmark: BenchmarkSettings = field(default_factory=BenchmarkSettings)
+    backup: BackupSettings = field(default_factory=BackupSettings)
     path: Optional[Path] = None
 
     def category(self, name: str) -> CategoryConfig:
@@ -248,11 +265,17 @@ def parse_settings(data: Any, path: Optional[Path] = None) -> Settings:
     parser = _section(data, "parser")
     schedule = _section(data, "schedule")
     benchmark = _section(data, "benchmark")
+    backup = _section(data, "backup")
 
     daily_at = str(schedule.get("daily_at") or "05:30")
     match = DAILY_AT_RE.fullmatch(daily_at)
     if not match:
         raise SettingsError("schedule.daily_at={!r}: ожидается ЧЧ:ММ".format(daily_at))
+
+    price_source = str(parser.get("price_source") or constants.PRICE_SOURCE_API)
+    if price_source not in constants.PRICE_SOURCES:
+        raise SettingsError("parser.price_source={!r}, допустимо: {}".format(
+            price_source, ", ".join(constants.PRICE_SOURCES)))
 
     return Settings(
         path=path,
@@ -272,6 +295,14 @@ def parse_settings(data: Any, path: Optional[Path] = None) -> Settings:
             csv_export=_path(parser.get("csv_export")),
             min_success_rate=_float(parser, "min_success_rate", 0.0, minimum=0.0, maximum=1.0,
                                      where="parser."),
+            price_source=price_source,
+            details_refresh_days=_int(parser, "details_refresh_days", 1, minimum=0,
+                                      maximum=365, where="parser."),
+        ),
+        backup=BackupSettings(
+            enabled=bool(backup.get("enabled", False)),
+            directory=_path(backup.get("dir")) or DEFAULT_BACKUP_DIR,
+            keep=_int(backup, "keep", 14, minimum=1, where="backup."),
         ),
         schedule=ScheduleSettings(
             daily_at=dt.time(int(match.group(1)), int(match.group(2))),

@@ -15,4 +15,5 @@ __pycache__/
 *.egg-info/
 data/
 logs/
+backups/
 *.tmp

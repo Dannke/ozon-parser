@@ -29,3 +29,9 @@ CHALLENGE_TEXT_MARKERS = (
     "вы не робот",
     "подтвердите, что вы",
 )
+
+# Откуда парсер берёт цену и остальные поля первой части карточки
+# (parse.ParseOptions, parser.price_source в config.yaml).
+PRICE_SOURCE_API = "api"
+PRICE_SOURCE_HTML = "html"
+PRICE_SOURCES = (PRICE_SOURCE_API, PRICE_SOURCE_HTML)

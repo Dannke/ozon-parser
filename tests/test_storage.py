@@ -189,6 +189,27 @@ def test_csv_failure_does_not_block_database():
     assert calls, "база должна быть записана до попытки сохранить CSV"
 
 
+def test_database_failure_still_writes_csv(monkeypatch):
+    """База недоступна - CSV всё равно пишется, а ошибка базы идёт наверх.
+
+    Регрессия: исключение из save_postgres вылетало до записи CSV, хотя CSV и
+    задуман страховкой на случай недоступной базы.
+    """
+    def database_down(*args, **kwargs):
+        raise storage.StorageError("Ошибка PostgreSQL: connection refused")
+
+    monkeypatch.setattr(storage, "save_postgres", database_down)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "products.csv"
+        try:
+            storage.save([SAMPLE], backend="postgres", csv_path=path)
+        except storage.StorageError as exc:
+            assert "connection refused" in str(exc)
+        else:
+            raise AssertionError("ошибка базы должна была подняться наверх")
+        assert len(path.read_text(encoding="utf-8-sig").splitlines()) == 2
+
+
 def test_csv_failure_is_fatal_when_csv_is_the_only_backend():
     """Если другого хранилища нет, ошибка CSV обязана быть фатальной."""
     with tempfile.TemporaryDirectory() as tmp:

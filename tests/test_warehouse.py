@@ -59,6 +59,22 @@ def test_html_source_does_not_claim_missing_rich_content():
     assert api["collected_at"] == at
 
 
+def test_slow_attributes_wait_for_the_description():
+    """Без второй части карточки описание и характеристики не перезаписываются.
+
+    None не затирает известное в products (COALESCE), а цена из той же записи
+    в историю попадает как обычно.
+    """
+    at = dt.datetime(2026, 10, 6, tzinfo=dt.timezone.utc)
+    without = warehouse.product_params(7, dict(PRODUCT, source="html", details=False), at)
+    assert [without[name] for name in warehouse.DETAIL_FIELDS] == [None] * 4
+    assert (without["price"], without["title"]) == (1463.0, "Раскраска по номерам")
+
+    full = warehouse.product_params(7, dict(PRODUCT, source="html", details=True), at)
+    assert (full["has_rich_content"], full["art_set"], full["color"]) == (
+        True, "Раскраска", "Темно-розовый")
+
+
 # ------------------------------------------------------------- с базой -----
 @pytest.fixture
 def wh():

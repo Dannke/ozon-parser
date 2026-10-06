@@ -19,3 +19,9 @@ if ROOT not in sys.path:
 # вроде "SKU 0000000000" перемешиваются с записями настоящих прогонов.
 # Задаётся до импорта пакета: логгеры создаются при импорте модулей.
 os.environ.setdefault("OZON_LOG_DIR", tempfile.mkdtemp(prefix="ozon-parser-test-logs-"))
+
+# Оповещения в тестах выключены, даже если они настроены в .env: пустые
+# значения в окружении сильнее файла (load_dotenv не трогает заданные
+# переменные), и ни один тест не напишет в настоящий Telegram.
+for _name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "HEALTHCHECK_URL"):
+    os.environ[_name] = ""

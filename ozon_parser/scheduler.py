@@ -3,13 +3,14 @@
 Сделано для docker-compose: контейнер parser живёт постоянно и раз в сутки
 (schedule.daily_at) выполняет те же шаги, что Airflow DAG:
 
-    ensure_session  ->  parse (panel)
+    ensure_session (если включён)  ->  parse (panel)  ->  backup  ->  оповещение
 
 Если Ozon остановил прогон (parse вышел с кодом EXIT_BLOCKED), прогон
 повторяется через schedule.block_retry_delay_hours, не больше
 schedule.block_retries раз. Повтор берёт только SKU, у которых за текущий день
 ещё нет наблюдения (parse --missing-today), а весь прогон с повторами
-укладывается в schedule.parse_timeout_hours.
+укладывается в schedule.parse_timeout_hours. Резервная копия базы (если
+backup.enabled) и оповещение (notify.py) - один раз, после всех повторов.
 
 Каждый шаг - отдельный процесс. Браузер и драйвер Playwright умирают вместе
 с процессом прогона, так что утечка памяти или зависший Chromium не
@@ -28,10 +29,11 @@ import sys
 import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from . import config
+from . import config, notify
 from .logger import get_logger
 from .pipeline import EXIT_BLOCKED
 from .settings import Settings
+from .warehouse import Warehouse
 
 log = get_logger("scheduler")
 
@@ -42,6 +44,9 @@ SLEEP_STEP_SECONDS = 60
 # Повтор не начинается, если до конца отведённого прогону времени остаётся
 # меньше часа: столько нужно, чтобы успеть собрать хоть сколько-то SKU.
 MIN_RETRY_WINDOW_SECONDS = 3600
+
+# Предел для шага backup: копия базы в несколько мегабайт снимается за секунды.
+BACKUP_TIMEOUT_SECONDS = 900
 
 
 def get_timezone(name: str) -> dt.tzinfo:
@@ -115,9 +120,10 @@ def _run_steps(settings: Settings, deadline: float, clock) -> int:
 
 
 def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
-    """Один ежедневный прогон с повторами после блокировки.
+    """Один ежедневный прогон с повторами после блокировки, копией базы и оповещением.
 
-    Возвращает код возврата последнего шага parse.
+    Возвращает код возврата последнего шага parse: ни копия, ни оповещение
+    его не меняют.
     """
     schedule = settings.schedule
     deadline = clock() + schedule.parse_timeout_hours * 3600
@@ -135,7 +141,41 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
                     attempt, schedule.block_retries, _clock_time(retry_at, settings))
         _sleep_until(retry_at, clock, sleep)
         code = _run_steps(settings, deadline, clock)
+
+    # Копия снимается и после неудачного прогона: собранное за день уже в базе.
+    backup_ok = _run_backup() if settings.backup.enabled else None
+    notify.report_job(code, backup_ok, summary=last_run_summary)
     return code
+
+
+def _run_backup() -> bool:
+    """Шаг backup отдельным процессом, как остальные шаги. True - копия снята."""
+    command = [sys.executable, "-m", "ozon_parser", "backup"]
+    log.info("Шаг backup: %s", " ".join(command[1:]))
+    started = time.monotonic()
+    try:
+        code = subprocess.run(command, cwd=str(config.BASE_DIR),
+                              timeout=BACKUP_TIMEOUT_SECONDS, check=False).returncode
+    except subprocess.TimeoutExpired:
+        log.error("Шаг backup не уложился в %s с и остановлен", BACKUP_TIMEOUT_SECONDS)
+        code = 1
+    log.info("Шаг backup завершён с кодом %s за %.0f с", code, time.monotonic() - started)
+    return code == 0
+
+
+def last_run_summary() -> str:
+    """Строка о последнем прогоне из parse_runs - для оповещения; пусто, если базы нет."""
+    try:
+        with Warehouse() as wh:
+            rows = wh.recent_runs(1)
+    except Exception as exc:  # noqa: BLE001 - оповещение не должно падать из-за базы
+        log.debug("Итог последнего прогона не прочитан: %s", exc)
+        return ""
+    if not rows:
+        return ""
+    run_id, kind, status, _started, total, ok, errors = rows[0][:7]
+    return "Прогон {} ({}): {}, успешно {} из {}, ошибок {}".format(
+        run_id, kind, status, ok, total, errors)
 
 
 def serve(settings: Settings, once: bool = False, clock=time.time) -> int:

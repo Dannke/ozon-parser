@@ -523,18 +523,30 @@ def parse_product(page_json: dict, sku: str) -> dict:
                                         exclude=MATERIAL_EXCLUDE),
         "art_set": find_characteristic(characteristics, ART_SET_KEYS),
         "has_rich_content": extract_has_rich_content(page_json),
+        # Есть ли в данных вторая часть карточки - описание и полные
+        # характеристики. Без неё art_set и has_rich_content не «нет», а «не
+        # знаем». Выставляет parse.py: только он знает, что запрашивалось.
+        "details": False,
         **offer,
         "discount_pct": discount_pct(price, offer["old_price"]),
     }
 
 
-def parse_html(html: str, sku: str) -> dict:
+def parse_html(html: str, sku: str, extra_states: Optional[dict] = None) -> dict:
     """Собирает запись о товаре из JSON, встроенного в HTML карточки.
 
     Состояния виджетов разбираются тем же кодом, что и ответ API. Чего в них
     не нашлось (название, цена, рейтинг, обложка), добирается из JSON-LD.
+
+    :param extra_states: состояния виджетов второй части карточки из API
+        (описание и полные характеристики) - в HTML их нет.
     """
     page_json = embedded_page_json(html)
+    if extra_states:
+        # Виджеты HTML идут первыми: при совпадении типа приоритет у них.
+        states = dict(page_json["widgetStates"])
+        states.update(extra_states)
+        page_json["widgetStates"] = states
     product = parse_product(page_json, sku)
     product["source"] = SOURCE_HTML
 

@@ -14,12 +14,14 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import random
 import statistics
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from . import config, parse
 from .db import DatabaseError
@@ -130,6 +132,32 @@ def run_status(success: int, errors: Counter) -> str:
     return "partial" if success else "failed"
 
 
+def details_schedule(wh: Warehouse, skus: list, refresh_days: int,
+                     today: Optional[dt.date] = None) -> Callable[[str], bool]:
+    """Кому в этом прогоне запрашивать вторую часть карточки.
+
+    Описание и полные характеристики (art_set, has_rich_content, цвет,
+    материал) почти не меняются, а это лишний запрос к Ozon на каждый товар:
+      * SKU без описания (новые в panel или оно ни разу не пришло) - в каждом
+        прогоне, пока не придёт;
+      * остальные - раз в refresh_days дней, причём каждый день своя доля
+        panel (по md5 от SKU), а не вся panel разом раз в неделю.
+    refresh_days = 1 - каждый день, как раньше; 0 - только SKU без описания.
+    """
+    missing = wh.skus_without_details(skus)
+    day = (today or dt.date.today()).toordinal()
+
+    def due(sku: str) -> bool:
+        if sku in missing:
+            return True
+        if refresh_days <= 0:
+            return False
+        slot = int(hashlib.md5(sku.encode("utf-8")).hexdigest()[:8], 16)
+        return (day + slot) % refresh_days == 0
+
+    return due
+
+
 def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual",
               sku_source: str = "panel") -> ParseReport:
     """Парсит SKU и ведёт учёт прогона в базе.
@@ -142,16 +170,21 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
     if stale:
         log.warning("Прогонов, брошенных упавшим процессом, помечено interrupted: %s", stale)
 
+    details_due = details_schedule(wh, skus, settings.parser.details_refresh_days)
+    options = parse.ParseOptions(price_source=settings.parser.price_source,
+                                 details_for=details_due)
     run_id = wh.start_parse_run(kind, sku_source, len(skus), config.REQUEST_DELAY)
     observer = WarehouseObserver(wh, run_id)
     csv_path = settings.parser.csv_export
-    log.info("PARSER START run_id=%s kind=%s source=%s total=%s request_delay=%.1f csv=%s",
-             run_id, kind, sku_source, len(skus), config.REQUEST_DELAY, csv_path or "-")
+    log.info("PARSER START run_id=%s kind=%s source=%s total=%s request_delay=%.1f "
+             "price_source=%s details=%s csv=%s",
+             run_id, kind, sku_source, len(skus), config.REQUEST_DELAY,
+             options.price_source, sum(1 for sku in skus if details_due(sku)), csv_path or "-")
 
     started = time.monotonic()
     try:
         parse.run(skus, storage_backend="csv" if csv_path else "none", output=csv_path,
-                  observer=observer)
+                  observer=observer, options=options)
     finally:
         # SKU, о которых парсер не отчитался (не открылась сессия, программная
         # ошибка), тоже должны остаться в учёте, а не пропасть молча.

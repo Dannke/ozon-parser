@@ -48,6 +48,20 @@ def test_broken_or_stale_session_needs_login(tmp_path, prepare, expected):
     assert reason is not None and expected in reason, reason
 
 
+def test_parser_works_without_session(tmp_path):
+    """Для карточек вход не нужен: нет файла - None, без токенов - сессия как есть."""
+    assert session.load_session(tmp_path / "cookies.json") is None
+
+    path = tmp_path / "guest.json"
+    path.write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+    assert session.load_session(path) == {"cookies": [], "origins": []}
+
+    folder = tmp_path / "folder.json"
+    folder.mkdir()  # так Docker подменяет отсутствующий файл тома
+    with pytest.raises(session.SessionError, match="повреждён"):
+        session.load_session(folder)
+
+
 def test_age_is_checked_only_when_limit_given(tmp_path):
     """Без --max-age-days старая, но целая сессия не перевыпускается."""
     path = write_session(tmp_path / "cookies.json", age_days=100)

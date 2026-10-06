@@ -94,9 +94,11 @@ MAX_CONSECUTIVE_CHALLENGES = _env_int("MAX_CONSECUTIVE_CHALLENGES", 3)
 
 # Сколько ждать полной загрузки (load) сверх domcontentloaded, мс.
 LOAD_STATE_TIMEOUT = _env_int("LOAD_STATE_TIMEOUT", 15_000)
-# Пауза после загрузки: Ozon нередко делает ещё один переход сразу после
-# domcontentloaded, и запрос к API падает на уничтоженном контексте, мс.
-PAGE_SETTLE_MS = _env_int("PAGE_SETTLE_MS", 1_500)
+# Пауза после загрузки перед запросом к API из вкладки, мс: Ozon нередко
+# делает ещё один переход сразу после domcontentloaded, и запрос падает на
+# уничтоженном контексте. Такой сбой fetch_page_json и так повторяет, поэтому
+# пауза короткая (была 1500 мс). Разбор одного HTML её не ждёт вовсе.
+PAGE_SETTLE_MS = _env_int("PAGE_SETTLE_MS", 500)
 # Сколько ждать, пока антибот-проверка Ozon пройдёт сама, секунды.
 CHALLENGE_TIMEOUT = _env_int("CHALLENGE_TIMEOUT", 30)
 
@@ -124,12 +126,27 @@ STORAGE = _env("STORAGE", "csv").lower()
 PG_DSN = _env("PG_DSN")
 PG_TABLE = _env("PG_TABLE", "ozon_products")
 
+# Учётная запись и база PostgreSQL в docker-compose (те же переменные читает
+# docker-compose.yml). Нужны резервной копии: pg_dump запускается внутри
+# контейнера, где вход по локальному сокету не спрашивает пароль.
+POSTGRES_USER = _env("POSTGRES_USER", "ozon")
+POSTGRES_DB = _env("POSTGRES_DB", "ozon")
+
 CH_HOST = _env("CH_HOST", "localhost")
 CH_PORT = _env_int("CH_PORT", 8123)
 CH_USER = _env("CH_USER", "default")
 CH_PASSWORD = _env("CH_PASSWORD")
 CH_DATABASE = _env("CH_DATABASE", "default")
 CH_TABLE = _env("CH_TABLE", "ozon_products")
+
+# --- Оповещения о ежедневном прогоне (notify.py) ------------------------------
+# Telegram: токен бота от @BotFather и id чата. Пишет только о проблемах.
+# Пусто - выключено.
+TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID")
+# «Пульс» для сервиса мониторинга вроде healthchecks.io: успех - этот адрес,
+# неудача - адрес + /fail. Пусто - выключено.
+HEALTHCHECK_URL = _env("HEALTHCHECK_URL")
 
 # --- Адреса -------------------------------------------------------------------
 DATA_OZON_URL = "https://data.ozon.ru/"

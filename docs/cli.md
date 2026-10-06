@@ -13,7 +13,8 @@ python -m ozon_parser [--config PATH] <команда> [флаги]
 ```
 
 `--config` — путь к `config.yaml` (иначе `PIPELINE_CONFIG` или `config.yaml` в
-корне проекта). Любая команда сначала применяет недостающие миграции схемы.
+корне проекта). Любая команда, кроме `backup`, сначала применяет недостающие
+миграции схемы.
 
 | Команда     | Флаги | Что делает |
 | ----------- | ----- | ---------- |
@@ -23,7 +24,8 @@ python -m ozon_parser [--config PATH] <команда> [флаги]
 | `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily`, `--missing-today` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик. `--missing-today` — только SKU panel, у которых за сегодня (по `schedule.timezone`) ещё нет успешного наблюдения: догон после блокировки; если таких нет — код 0 без прогона |
 | `benchmark` | `--sample N`, `--seed S`, `--file PATH` | Замер скорости на случайных SKU panel (или из файла) и расчёт дневной ёмкости |
 | `runs`      | `--limit N` (10) | Последние прогоны и объём истории |
-| `schedule`  | `--once` | Ежедневный прогон: без флага — цикл до `daily_at` (контейнер), `--once` — выполнить прогон сейчас и выйти |
+| `backup`    | — | Резервная копия базы: `pg_dump` внутри контейнера `postgres` в `backup.dir` (`backups/ozon-ГГГГ-ММ-ДД.dump`), проверка архива через `pg_restore --list`, хранится `backup.keep` последних копий. Нужен запущенный Docker Desktop |
+| `schedule`  | `--once` | Ежедневный прогон: без флага — цикл до `daily_at` (контейнер), `--once` — выполнить прогон сейчас и выйти. После прогона и повторов — `backup` (если `backup.enabled`) и оповещение |
 
 Примеры:
 
@@ -121,6 +123,8 @@ powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
 - `discover` — хотя бы одна категория не собрана до `panel_size`;
 - `parse` — нет успешных SKU или доля успеха ниже `parser.min_success_rate`;
 - `benchmark` — ни одного успешного SKU;
+- `backup` — копия не создана (нет Docker, `pg_dump` не сработал, архив не
+  прошёл проверку); прежние копии при этом не трогаются;
 - ошибки настроек, подключения к PostgreSQL, параллельный прогон.
 
 `2` — `parse --missing-today` вместе со списком SKU или `--file`.
