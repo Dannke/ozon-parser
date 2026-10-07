@@ -23,7 +23,7 @@ pip install -e ".[dev,postgres]"
 pytest
 ```
 
-240 проверок в 22 файлах. Тесты не ходят в сеть и не отправляют оповещений,
+243 проверки в 22 файлах. Тесты не ходят в сеть и не отправляют оповещений,
 даже если они настроены в `.env` (`conftest.py` выключает их):
 
 - `test_pipeline.py` использует настоящий браузер, но все ответы Ozon
@@ -65,7 +65,7 @@ TEST_PG_DSN=postgresql://ozon:change-me@localhost:5433/ozon_test pytest
 | `tests/test_storage.py`        | 12 | Согласованность колонок БД, запись CSV, порядок сохранения, CSV при недоступной базе |
 | `tests/test_check_snapshot.py` |  6 | Шаг контроля: свежий, пустой, устаревший и отсутствующий CSV              |
 | `tests/test_db.py`             |  4 | Разбор и проверка имён таблиц                                             |
-| `tests/test_parse_run.py`      |  4 | Перезапуск упавшего браузера, батчи, доля успеха                          |
+| `tests/test_parse_run.py`      |  7 | Перезапуск упавшего браузера, батчи, доля успеха, темп по частоте карточек |
 
 Тесты **не** проверяют ClickHouse, живой Airflow, Docker и живой ozon.ru.
 Живые проверки ведутся в [verification-log.md](verification-log.md).

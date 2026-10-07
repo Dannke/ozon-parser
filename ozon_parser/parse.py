@@ -468,6 +468,18 @@ class RunProgress:
             log.exception("SKU %s: не удалось записать результат", outcome.sku)
 
 
+def pause_after_sku(started: float) -> None:
+    """Пауза перед следующим товаром.
+
+    Не меньше REQUEST_DELAY после разбора и не меньше PAGE_INTERVAL между
+    открытиями карточек: темп задаёт частота страниц, а не скорость разбора.
+    Ускорение разбора (режим html) иначе учащает страницы при той же паузе.
+
+    :param started: time.monotonic() в момент, когда SKU начали разбирать.
+    """
+    time.sleep(max(config.REQUEST_DELAY, config.PAGE_INTERVAL - (time.monotonic() - started)))
+
+
 def save_results(rows: list, backend: str, output: Optional[Path],
                  snapshot_date: Optional[dt.date]) -> bool:
     """Сохраняет собранное. Возвращает False, если сохранить не удалось."""
@@ -518,7 +530,7 @@ def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
 
                 # Пауза между товарами, чтобы не долбить сайт очередью запросов.
                 if progress.pending:
-                    time.sleep(config.REQUEST_DELAY)
+                    pause_after_sku(started)
         finally:
             browser_utils.close_quietly(context, browser)
 

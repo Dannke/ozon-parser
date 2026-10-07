@@ -78,6 +78,12 @@ PAGE_TIMEOUT = _env_int("PAGE_TIMEOUT", 60_000)
 BROWSER_CHANNEL = _env("BROWSER_CHANNEL")
 
 REQUEST_DELAY = _env_float("REQUEST_DELAY", 3.0)
+# Карточки открываются не чаще раза в столько секунд, как бы быстро ни шёл
+# разбор. Блокирует Ozon не время разбора, а частота страниц: 07.10.2026 при
+# ~14 карточках в минуту (та же пауза 3 с, разбор из HTML) капча пришла на
+# 14-й минуте, а при ~9 в минуту прогоны идут часами. 6.5 с - не чаще ~9
+# карточек в минуту. 0 - без предела, только REQUEST_DELAY.
+PAGE_INTERVAL = _env_float("PAGE_INTERVAL", 6.5)
 MAX_RETRIES = _env_int("MAX_RETRIES", 2)
 
 # Сколько раз перезапускать браузер, если он упал посреди списка SKU.
@@ -96,9 +102,9 @@ MAX_CONSECUTIVE_CHALLENGES = _env_int("MAX_CONSECUTIVE_CHALLENGES", 3)
 LOAD_STATE_TIMEOUT = _env_int("LOAD_STATE_TIMEOUT", 15_000)
 # Пауза после загрузки перед запросом к API из вкладки, мс: Ozon нередко
 # делает ещё один переход сразу после domcontentloaded, и запрос падает на
-# уничтоженном контексте. Такой сбой fetch_page_json и так повторяет, поэтому
-# пауза короткая (была 1500 мс). Разбор одного HTML её не ждёт вовсе.
-PAGE_SETTLE_MS = _env_int("PAGE_SETTLE_MS", 500)
+# уничтоженном контексте. Разбор одного HTML её не ждёт. 06.10.2026 и 500 мс
+# обходились без таких сбоев, но 1500 - значение проверенных прогонов.
+PAGE_SETTLE_MS = _env_int("PAGE_SETTLE_MS", 1_500)
 # Сколько ждать, пока антибот-проверка Ozon пройдёт сама, секунды.
 CHALLENGE_TIMEOUT = _env_int("CHALLENGE_TIMEOUT", 30)
 

@@ -177,8 +177,8 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
     observer = WarehouseObserver(wh, run_id)
     csv_path = settings.parser.csv_export
     log.info("PARSER START run_id=%s kind=%s source=%s total=%s request_delay=%.1f "
-             "price_source=%s details=%s csv=%s",
-             run_id, kind, sku_source, len(skus), config.REQUEST_DELAY,
+             "page_interval=%.1f price_source=%s details=%s csv=%s",
+             run_id, kind, sku_source, len(skus), config.REQUEST_DELAY, config.PAGE_INTERVAL,
              options.price_source, sum(1 for sku in skus if details_due(sku)), csv_path or "-")
 
     started = time.monotonic()
