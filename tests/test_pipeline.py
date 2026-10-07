@@ -284,7 +284,7 @@ def test_parse_sku_reads_fields_from_api():
 def test_html_mode_does_not_touch_api():
     """Режим html: цена и название - из HTML карточки, запросов к API нет."""
     requests: list = []
-    options = parse.ParseOptions(price_source="html", details_for=lambda sku: False)
+    options = parse.ParseOptions(price_source="html", details_for=frozenset())
     product = _parse("2359066702", options=options, requests=requests)
 
     assert product["source"] == extract.SOURCE_HTML
@@ -296,7 +296,7 @@ def test_html_mode_does_not_touch_api():
 def test_html_mode_adds_description_when_due():
     """Описание и характеристики (вторая часть) догружаются из API, цена - из HTML."""
     requests: list = []
-    options = parse.ParseOptions(price_source="html", details_for=lambda sku: True)
+    options = parse.ParseOptions(price_source="html", details_for=frozenset({"2359066702"}))
     product = _parse("2359066702", options=options, requests=requests)
 
     assert product["price"] == 9990.0

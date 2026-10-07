@@ -21,7 +21,7 @@ import statistics
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 from . import config, parse
 from .db import DatabaseError
@@ -133,8 +133,8 @@ def run_status(success: int, errors: Counter) -> str:
 
 
 def details_schedule(wh: Warehouse, skus: list, refresh_days: int,
-                     today: Optional[dt.date] = None) -> Callable[[str], bool]:
-    """Кому в этом прогоне запрашивать вторую часть карточки.
+                     today: Optional[dt.date] = None) -> Optional[frozenset]:
+    """Каким SKU в этом прогоне запрашивать вторую часть карточки; None - всем.
 
     Описание и полные характеристики (art_set, has_rich_content, цвет,
     материал) почти не меняются, а это лишний запрос к Ozon на каждый товар:
@@ -144,18 +144,14 @@ def details_schedule(wh: Warehouse, skus: list, refresh_days: int,
         panel (по md5 от SKU), а не вся panel разом раз в неделю.
     refresh_days = 1 - каждый день, как раньше; 0 - только SKU без описания.
     """
+    if refresh_days == 1:
+        return None
     missing = wh.skus_without_details(skus)
+    if refresh_days <= 0:
+        return frozenset(missing)
     day = (today or dt.date.today()).toordinal()
-
-    def due(sku: str) -> bool:
-        if sku in missing:
-            return True
-        if refresh_days <= 0:
-            return False
-        slot = int(hashlib.md5(sku.encode("utf-8")).hexdigest()[:8], 16)
-        return (day + slot) % refresh_days == 0
-
-    return due
+    return frozenset(sku for sku in skus if sku in missing or (
+        day + int(hashlib.md5(sku.encode("utf-8")).hexdigest()[:8], 16)) % refresh_days == 0)
 
 
 def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual",
@@ -179,7 +175,8 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
     log.info("PARSER START run_id=%s kind=%s source=%s total=%s request_delay=%.1f "
              "page_interval=%.1f price_source=%s details=%s csv=%s",
              run_id, kind, sku_source, len(skus), config.REQUEST_DELAY, config.PAGE_INTERVAL,
-             options.price_source, sum(1 for sku in skus if details_due(sku)), csv_path or "-")
+             options.price_source, len(skus) if details_due is None else len(details_due),
+             csv_path or "-")
 
     started = time.monotonic()
     try:

@@ -182,14 +182,14 @@ def test_details_are_spread_over_the_week():
     week = [pipeline.details_schedule(wh, skus + ["new"], 7, dt.date(2026, 10, 6) +
                                       dt.timedelta(days=day)) for day in range(7)]
 
-    assert all(sum(due(sku) for due in week) == 1 for sku in skus)
-    assert all(due("new") for due in week)            # без описания - каждый день
-    assert 60 < sum(week[0](sku) for sku in skus) < 140  # около 1/7 panel в день
+    assert all(due is not None for due in week)
+    assert all(sum(sku in due for due in week if due) == 1 for sku in skus)
+    assert all("new" in due for due in week if due)   # без описания - каждый день
+    assert 60 < len((week[0] or set()) - {"new"}) < 140  # около 1/7 panel в день
 
-    every_day = pipeline.details_schedule(wh, skus, 1)
-    only_new = pipeline.details_schedule(wh, skus + ["new"], 0)
-    assert all(every_day(sku) for sku in skus)
-    assert not any(only_new(sku) for sku in skus) and only_new("new")
+    # Раз в день - всем (None), без запроса к базе; 0 - только SKU без описания.
+    assert pipeline.details_schedule(wh, skus, 1) is None
+    assert pipeline.details_schedule(wh, skus + ["new"], 0) == {"new"}
 
 
 def test_second_parallel_run_is_refused():

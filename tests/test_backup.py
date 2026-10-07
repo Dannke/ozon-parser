@@ -7,6 +7,7 @@ stdout то же, что настоящий pg_dump, и отдаёт оглав�
 from __future__ import annotations
 
 import datetime as dt
+import os
 import subprocess
 from typing import Optional
 
@@ -29,7 +30,11 @@ def fake_docker(dump: bytes = b"PGDMP\x01\x0e\x00 data", dump_code: int = 0,
             kwargs["stdout"].write(dump)
             stderr = b"pg_dump: error: connection failed" if dump_code else b""
             return subprocess.CompletedProcess(command, dump_code, stderr=stderr)
-        assert kwargs["stdin"].read(5) == b"PGDMP"
+        # pg_restore получает дескриптор ОС: он должен стоять в начале файла
+        # (tell() буферизованного объекта этого не гарантирует).
+        stdin = kwargs["stdin"]
+        assert os.lseek(stdin.fileno(), 0, os.SEEK_CUR) == 0
+        assert os.read(stdin.fileno(), 5) == b"PGDMP"
         return subprocess.CompletedProcess(command, 0, stdout=listing, stderr=b"")
     return run
 

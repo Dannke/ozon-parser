@@ -19,9 +19,9 @@ FULL_HTML = card_html({"webProductHeading-1-default-1": {"title": "Кресло 
                        "webPrice-2-default-1": {"price": "9 990 ₽"}})
 NO_PRICE_HTML = card_html({"webProductHeading-1-default-1": {"title": "Кресло из HTML"}})
 
-HTML_ONLY = parse.ParseOptions(price_source="html", details_for=lambda sku: False)
-HTML_WITH_DETAILS = parse.ParseOptions(price_source="html", details_for=lambda sku: True)
-API_NO_DETAILS = parse.ParseOptions(price_source="api", details_for=lambda sku: False)
+HTML_ONLY = parse.ParseOptions(price_source="html", details_for=frozenset())
+HTML_WITH_DETAILS = parse.ParseOptions(price_source="html", details_for=frozenset({"1"}))
+API_NO_DETAILS = parse.ParseOptions(price_source="api", details_for=frozenset())
 
 
 class FakeSite:

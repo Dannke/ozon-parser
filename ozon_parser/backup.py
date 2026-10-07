@@ -61,8 +61,8 @@ def _run(name: str, command: list, runner: Callable, **kwargs) -> subprocess.Com
 
 
 def _stderr(result: subprocess.CompletedProcess) -> str:
-    raw = result.stderr or b""
-    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    """Хвост stderr для сообщения об ошибке (процессы запускаются в байтовом режиме)."""
+    text = (result.stderr or b"").decode("utf-8", errors="replace")
     return " ".join(text.split())[-300:]
 
 
@@ -103,6 +103,9 @@ def verify(path: Path, runner: Callable = subprocess.run) -> None:
     with path.open("rb") as handle:
         if handle.read(len(DUMP_MAGIC)) != DUMP_MAGIC:
             raise BackupError("{} - не архив pg_dump".format(path.name))
+    # Файл открывается заново, а не перематывается seek(0): дочерний процесс
+    # читает дескриптор ОС, а после буферизованного read() он стоит дальше
+    # начала файла, даже если tell() показывает 0.
     with path.open("rb") as handle:
         result = _run("pg_restore", compose_exec("pg_restore", "--list"), runner,
                       stdin=handle, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

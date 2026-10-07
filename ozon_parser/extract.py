@@ -26,6 +26,8 @@ from collections.abc import Iterator
 from html.parser import HTMLParser
 from typing import Any, Optional
 
+from . import constants
+
 # Порядок колонок в CSV и таблицах БД.
 FIELDS = (
     "sku",
@@ -43,10 +45,10 @@ FIELDS = (
 )
 
 # Откуда взялись данные карточки. Пишется в БД (в CSV - только 12 полей
-# задания): в HTML нет описания и полных характеристик, поэтому у записей
-# из него art_set и has_rich_content заведомо пусты.
-SOURCE_API = "api"
-SOURCE_HTML = "html"
+# задания). Значения те же, что у режимов парсера (constants.PRICE_SOURCE_*):
+# режим html даёт записи с source = html.
+SOURCE_API = constants.PRICE_SOURCE_API
+SOURCE_HTML = constants.PRICE_SOURCE_HTML
 
 # Имена виджетов, из которых берутся данные (сопоставление по префиксу).
 W_HEADING = "webProductHeading"
@@ -497,8 +499,18 @@ def extract_has_rich_content(page_json: dict) -> bool:
 
 
 # -------------------------------------------------------------- сборка ------
-def parse_product(page_json: dict, sku: str) -> dict:
-    """Собирает запись о товаре из ответа API (или совместимого с ним JSON)."""
+def parse_product(page_json: dict, sku: str, extra_states: Optional[dict] = None) -> dict:
+    """Собирает запись о товаре из ответа API (или совместимого с ним JSON).
+
+    :param extra_states: состояния виджетов второй части карточки - описание
+        и полные характеристики. Дописываются после виджетов page_json, так
+        что при совпадении типа приоритет у первой части. Без них art_set и
+        has_rich_content не «нет», а «не знаем» - это отмечает поле details.
+    """
+    if extra_states is not None:
+        states = dict(page_json.get("widgetStates") or {})
+        states.update(extra_states)
+        page_json = dict(page_json, widgetStates=states)
     characteristics = collect_characteristics(page_json)
     rating, reviews_total = extract_score(page_json)
     cover_image, photos_seller, videos_seller = extract_media(page_json)
@@ -523,10 +535,8 @@ def parse_product(page_json: dict, sku: str) -> dict:
                                         exclude=MATERIAL_EXCLUDE),
         "art_set": find_characteristic(characteristics, ART_SET_KEYS),
         "has_rich_content": extract_has_rich_content(page_json),
-        # Есть ли в данных вторая часть карточки - описание и полные
-        # характеристики. Без неё art_set и has_rich_content не «нет», а «не
-        # знаем». Выставляет parse.py: только он знает, что запрашивалось.
-        "details": False,
+        # Пришла ли вторая часть карточки (см. extra_states).
+        "details": extra_states is not None,
         **offer,
         "discount_pct": discount_pct(price, offer["old_price"]),
     }
@@ -541,16 +551,20 @@ def parse_html(html: str, sku: str, extra_states: Optional[dict] = None) -> dict
     :param extra_states: состояния виджетов второй части карточки из API
         (описание и полные характеристики) - в HTML их нет.
     """
-    page_json = embedded_page_json(html)
-    if extra_states:
-        # Виджеты HTML идут первыми: при совпадении типа приоритет у них.
-        states = dict(page_json["widgetStates"])
-        states.update(extra_states)
-        page_json["widgetStates"] = states
-    product = parse_product(page_json, sku)
+    return product_from_embedded(embedded_page_json(html), sku, extra_states)
+
+
+def product_from_embedded(embedded: dict, sku: str,
+                          extra_states: Optional[dict] = None) -> dict:
+    """parse_html по уже разобранному HTML (результат embedded_page_json).
+
+    Разбор HTML - самая дорогая часть, поэтому, если к карточке позже
+    догружается вторая часть, его не повторяют. embedded не изменяется.
+    """
+    product = parse_product(embedded, sku, extra_states)
     product["source"] = SOURCE_HTML
 
-    ld = page_json["jsonLd"]
+    ld = embedded["jsonLd"]
     offers = ld.get("offers") or {}
     if isinstance(offers, list):
         offers = offers[0] if offers else {}

@@ -28,7 +28,7 @@ PRODUCT = {
     "card_price": 1317.0, "old_price": 7990.0, "discount_pct": 81.69, "is_available": True,
     "rating": 4.9, "reviews_total": 1627, "cover_image": "https://ir.ozone.ru/cover.jpg",
     "photos_seller": 19, "videos_seller": 2, "color": "Темно-розовый", "material": "Бумага",
-    "art_set": "Раскраска", "has_rich_content": True,
+    "art_set": "Раскраска", "has_rich_content": True, "details": True,
 }
 
 
@@ -53,7 +53,8 @@ def test_html_source_does_not_claim_missing_rich_content():
     """В HTML нет описания: False оттуда - «не знаем», а не «нет rich-контента»."""
     at = dt.datetime(2026, 9, 29, tzinfo=dt.timezone.utc)
     api = warehouse.product_params(7, PRODUCT, at)
-    html = warehouse.product_params(7, dict(PRODUCT, source="html", has_rich_content=False), at)
+    html = warehouse.product_params(7, dict(PRODUCT, source="html", has_rich_content=False,
+                                            details=False), at)
     assert api["has_rich_content"] is True and api["run_id"] == 7
     assert html["has_rich_content"] is None
     assert api["collected_at"] == at
@@ -137,7 +138,7 @@ def test_history_grows_between_runs_but_not_within_one(wh):
     day2 = dt.datetime(2026, 9, 29, 3, 0, tzinfo=dt.timezone.utc)
     # Запасной путь (HTML): пустые характеристики не затирают известные.
     wh.record_product(second, dict(PRODUCT, price=1400.0, source="html", color=None,
-                                   has_rich_content=False), day2)
+                                   has_rich_content=False, details=False), day2)
 
     assert wh.history_counts() == (2, 1, 2)
 

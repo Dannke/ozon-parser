@@ -16,8 +16,11 @@ BASE = {"discovery": {"categories": [
      "panel_size": 5}]}}
 
 
-def settings(**schedule):
-    return parse_settings(dict(BASE, schedule=dict({"daily_at": "05:30"}, **schedule)))
+def settings(backup=None, **schedule):
+    data = dict(BASE, schedule=dict({"daily_at": "05:30"}, **schedule))
+    if backup is not None:
+        data["backup"] = backup
+    return parse_settings(data)
 
 
 def at_msk(hour, minute, day=29):
@@ -148,8 +151,7 @@ def test_no_retry_without_time_left(monkeypatch):
 
 
 def with_backup():
-    return parse_settings(dict(BASE, schedule={"daily_at": "05:30", "ensure_session": False},
-                               backup={"enabled": True}))
+    return settings(backup={"enabled": True}, ensure_session=False)
 
 
 def recorded_reports(monkeypatch) -> list:

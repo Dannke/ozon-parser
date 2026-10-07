@@ -27,9 +27,10 @@ import datetime as dt
 import subprocess
 import sys
 import time
+from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from . import config, notify
+from . import backup, config, notify
 from .logger import get_logger
 from .pipeline import EXIT_BLOCKED
 from .settings import Settings
@@ -45,8 +46,10 @@ SLEEP_STEP_SECONDS = 60
 # меньше часа: столько нужно, чтобы успеть собрать хоть сколько-то SKU.
 MIN_RETRY_WINDOW_SECONDS = 3600
 
-# Предел для шага backup: копия базы в несколько мегабайт снимается за секунды.
-BACKUP_TIMEOUT_SECONDS = 900
+# Предел для шага backup: внутри него pg_dump и проверка pg_restore, у каждого
+# свой предел backup.TIMEOUT_SECONDS. Копия в несколько мегабайт снимается за
+# секунды - это страховка от зависшего Docker.
+BACKUP_TIMEOUT_SECONDS = 2 * backup.TIMEOUT_SECONDS + 60
 
 
 def get_timezone(name: str) -> dt.tzinfo:
@@ -97,21 +100,30 @@ def _sleep_until(target: float, clock, sleep) -> None:
         sleep(min(SLEEP_STEP_SECONDS, max(target - clock(), 0)))
 
 
+def _run_step(name: str, command: list, timeout: float, limit: Callable[[], str]) -> int:
+    """Шаг отдельным процессом. Возвращает код возврата (1 - не уложился в timeout).
+
+    :param limit: описание предела для лога; вызывается, только если он превышен.
+    """
+    log.info("Шаг %s: %s", name, " ".join(command[1:]))
+    started = time.monotonic()
+    try:
+        code = subprocess.run(command, cwd=str(config.BASE_DIR), timeout=timeout,
+                              check=False).returncode
+    except subprocess.TimeoutExpired:
+        log.error("Шаг %s не уложился в %s и остановлен", name, limit())
+        code = 1
+    log.info("Шаг %s завершён с кодом %s за %.0f с", name, code, time.monotonic() - started)
+    return code
+
+
 def _run_steps(settings: Settings, deadline: float, clock) -> int:
     """Шаги прогона по очереди. Возвращает код возврата шага parse."""
     code = 1
     for name, command in job_commands(settings):
-        timeout = max(deadline - clock(), 1)
-        log.info("Шаг %s: %s", name, " ".join(command[1:]))
-        started = time.monotonic()
-        try:
-            code = subprocess.run(command, cwd=str(config.BASE_DIR), timeout=timeout,
-                                  check=False).returncode
-        except subprocess.TimeoutExpired:
-            log.error("Шаг %s не уложился в отведённое время (до %s) и остановлен", name,
-                      _clock_time(deadline, settings))
-            code = 1
-        log.info("Шаг %s завершён с кодом %s за %.0f с", name, code, time.monotonic() - started)
+        code = _run_step(name, command, max(deadline - clock(), 1),
+                         lambda: "отведённое время (до {})".format(
+                             _clock_time(deadline, settings)))
         if name == "ensure_session" and code != 0:
             # Карточки ozon.ru открываются и без входа: прогон всё равно
             # запускаем, а проблема с сессией видна в логе и в parse_runs.
@@ -150,17 +162,9 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
 
 def _run_backup() -> bool:
     """Шаг backup отдельным процессом, как остальные шаги. True - копия снята."""
-    command = [sys.executable, "-m", "ozon_parser", "backup"]
-    log.info("Шаг backup: %s", " ".join(command[1:]))
-    started = time.monotonic()
-    try:
-        code = subprocess.run(command, cwd=str(config.BASE_DIR),
-                              timeout=BACKUP_TIMEOUT_SECONDS, check=False).returncode
-    except subprocess.TimeoutExpired:
-        log.error("Шаг backup не уложился в %s с и остановлен", BACKUP_TIMEOUT_SECONDS)
-        code = 1
-    log.info("Шаг backup завершён с кодом %s за %.0f с", code, time.monotonic() - started)
-    return code == 0
+    return _run_step("backup", [sys.executable, "-m", "ozon_parser", "backup"],
+                     BACKUP_TIMEOUT_SECONDS,
+                     lambda: "{} с".format(BACKUP_TIMEOUT_SECONDS)) == 0
 
 
 def last_run_summary() -> str:

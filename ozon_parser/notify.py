@@ -21,6 +21,7 @@ from typing import Callable, Optional
 
 from . import config
 from .logger import get_logger
+from .pipeline import EXIT_BLOCKED
 
 log = get_logger("notify")
 
@@ -30,7 +31,7 @@ TELEGRAM_URL = "https://api.telegram.org/bot{token}/sendMessage"
 # Что значат коды выхода шага parse (см. docs/cli.md, «Коды возврата»).
 EXIT_MEANINGS = {
     1: "прогон не удался",
-    3: "Ozon остановил прогон (капча или отказы подряд)",
+    EXIT_BLOCKED: "Ozon остановил прогон (капча или отказы подряд)",
 }
 
 

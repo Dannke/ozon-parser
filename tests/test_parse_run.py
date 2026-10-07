@@ -69,21 +69,23 @@ def test_success_rate_counts_unprocessed_skus(monkeypatch, saved):
     assert [row["sku"] for row in saved[-1]] == ["1"]
 
 
-@pytest.mark.parametrize("interval, parsed_in, expected", [
-    (6.5, 0.8, 5.7),   # быстрый разбор (html): ждём до 6,5 с от открытия карточки
-    (6.5, 3.6, 3.0),   # обычный разбор (api): пауза не меньше REQUEST_DELAY
-    (0.0, 0.8, 3.0),   # без предела частоты - только REQUEST_DELAY
+@pytest.mark.parametrize("interval, since_last_open, expected", [
+    (6.5, 3.8, [2.7]),  # быстрый разбор (html) + пауза 3 с: ждём до 6,5 с от прошлой карточки
+    (6.5, 6.6, []),     # обычный разбор (api) уже дольше предела - не ждём
+    (0.0, 3.8, []),     # предел выключен
 ])
-def test_pace_is_set_by_page_rate_not_by_parse_speed(monkeypatch, interval, parsed_in, expected):
-    """07.10.2026: тот же REQUEST_DELAY при быстром разборе дал ~14 карточек в минуту и капчу."""
+def test_pages_open_no_faster_than_page_interval(monkeypatch, interval, since_last_open,
+                                                 expected):
+    """07.10.2026: та же пауза 3 с при быстром разборе дала ~14 карточек в минуту и капчу."""
     slept: list = []
-    monkeypatch.setattr(config, "REQUEST_DELAY", 3.0)
     monkeypatch.setattr(config, "PAGE_INTERVAL", interval)
-    monkeypatch.setattr(parse.time, "monotonic", lambda: 100.0 + parsed_in)
+    monkeypatch.setattr(parse, "_last_page_open", 100.0)
+    monkeypatch.setattr(parse.time, "monotonic", lambda: 100.0 + since_last_open)
     monkeypatch.setattr(parse.time, "sleep", slept.append)
 
-    parse.pause_after_sku(started=100.0)
-    assert slept == [pytest.approx(expected)]
+    parse.wait_page_slot()
+    assert slept == [pytest.approx(value) for value in expected]
+    assert parse._last_page_open == 100.0 + since_last_open  # отсчёт - от этого открытия
 
 
 def test_batches_are_flushed_during_run(monkeypatch, saved):

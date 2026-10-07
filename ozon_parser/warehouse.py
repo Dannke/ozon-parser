@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import config, db
-from .extract import SOURCE_HTML
 from .logger import get_logger
 from .sampling import PanelPick
 
@@ -171,13 +170,9 @@ def product_params(run_id: int, product: dict, collected_at: dt.datetime) -> dic
     # rich-контента», хотя на деле «не знаем». None не затирает в products
     # известное (COALESCE) - медленные атрибуты обновляются, когда приходит
     # описание (pipeline.details_schedule).
-    details = product.get("details")
-    if details is False:
+    if not product.get("details"):
         for name in DETAIL_FIELDS:
             params[name] = None
-    elif details is None and product.get("source") == SOURCE_HTML:
-        # Запись без отметки: в HTML описания нет.
-        params["has_rich_content"] = None
     return params
 
 
