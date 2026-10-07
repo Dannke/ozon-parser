@@ -69,6 +69,25 @@ def test_success_rate_counts_unprocessed_skus(monkeypatch, saved):
     assert [row["sku"] for row in saved[-1]] == ["1"]
 
 
+@pytest.mark.parametrize("interval, since_last_open, expected", [
+    (6.5, 3.8, [2.7]),  # быстрый разбор (html) + пауза 3 с: ждём до 6,5 с от прошлой карточки
+    (6.5, 6.6, []),     # обычный разбор (api) уже дольше предела - не ждём
+    (0.0, 3.8, []),     # предел выключен
+])
+def test_pages_open_no_faster_than_page_interval(monkeypatch, interval, since_last_open,
+                                                 expected):
+    """07.10.2026: та же пауза 3 с при быстром разборе дала ~14 карточек в минуту и капчу."""
+    slept: list = []
+    monkeypatch.setattr(config, "PAGE_INTERVAL", interval)
+    monkeypatch.setattr(parse, "_last_page_open", 100.0)
+    monkeypatch.setattr(parse.time, "monotonic", lambda: 100.0 + since_last_open)
+    monkeypatch.setattr(parse.time, "sleep", slept.append)
+
+    parse.wait_page_slot()
+    assert slept == [pytest.approx(value) for value in expected]
+    assert parse._last_page_open == 100.0 + since_last_open  # отсчёт - от этого открытия
+
+
 def test_batches_are_flushed_during_run(monkeypatch, saved):
     """Промежуточные сохранения идут по ходу прогона, а не только в конце."""
     run_session, _ = fake_browser(crash_on=set())

@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import config, db
-from .extract import SOURCE_HTML
 from .logger import get_logger
 from .sampling import PanelPick
 
@@ -151,6 +150,8 @@ PRODUCT_FIELDS = ("sku", "title", "cover_image", "color", "material", "art_set",
                   "has_rich_content", "photos_seller", "videos_seller")
 PRICE_FIELDS = ("sku", "price", "card_price", "old_price", "discount_pct", "is_available",
                 "rating", "reviews_total", "source")
+# Поля карточки, которые берутся из второй части (описание, полные характеристики).
+DETAIL_FIELDS = ("has_rich_content", "art_set", "color", "material")
 
 
 def migration_files(directory: Path = MIGRATIONS_DIR) -> list:
@@ -164,9 +165,14 @@ def product_params(run_id: int, product: dict, collected_at: dt.datetime) -> dic
     params["sku"] = str(product["sku"])
     params["run_id"] = run_id
     params["collected_at"] = collected_at
-    # В HTML нет описания: False здесь значит «не знаем», а не «нет rich-контента».
-    if product.get("source") == SOURCE_HTML:
-        params["has_rich_content"] = None
+    # Описание и полные характеристики известны, только если пришла вторая
+    # часть карточки (details). Без неё значения неполны: False значил бы «нет
+    # rich-контента», хотя на деле «не знаем». None не затирает в products
+    # известное (COALESCE) - медленные атрибуты обновляются, когда приходит
+    # описание (pipeline.details_schedule).
+    if not product.get("details"):
+        for name in DETAIL_FIELDS:
+            params[name] = None
     return params
 
 
@@ -445,6 +451,21 @@ class Warehouse:
             cursor.execute(PRODUCT_UPSERT, params)
             cursor.execute(PRICE_UPSERT, params)
         self.run(write)
+
+    def skus_without_details(self, skus: Iterable[str]) -> set:
+        """SKU, у которых ещё нет описания: карточки нет в products или вторая
+        часть (has_rich_content) ни разу не приходила."""
+        values = list(skus)
+        if not values:
+            return set()
+
+        def query(cursor) -> set:
+            cursor.execute(
+                "SELECT s.sku FROM unnest(%s::text[]) AS s(sku) "
+                "LEFT JOIN products p ON p.sku = s.sku "
+                "WHERE p.sku IS NULL OR p.has_rich_content IS NULL", (values,))
+            return {row[0] for row in cursor.fetchall()}
+        return self.run(query)
 
     def record_error(self, run_id: int, sku: str, error_type: str, message: str,
                      attempts: Optional[int] = None) -> None:

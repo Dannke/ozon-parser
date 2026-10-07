@@ -223,7 +223,8 @@ def save(rows: Sequence[dict], backend: str = "", csv_path: Optional[Path] = Non
 
     CSV при этом пишется всегда, даже при работе с БД: это дешёвая страховка
     на случай, если база недоступна, и удобный артефакт для глазной проверки.
-    Его ошибка фатальна только тогда, когда другого хранилища нет.
+    Ошибка базы поднимается наверх уже после записи CSV - прогон не должен
+    выглядеть успешным. Ошибка CSV фатальна, только если другого хранилища нет.
 
     :param snapshot_date: дата среза для таблиц БД; по умолчанию сегодня.
         Airflow передаёт сюда дату запуска, чтобы перезапуск задачи за прошлый
@@ -237,16 +238,25 @@ def save(rows: Sequence[dict], backend: str = "", csv_path: Optional[Path] = Non
     if backend == "none":
         return
 
-    if backend == "postgres":
-        save_postgres(rows, config.PG_DSN, config.PG_TABLE, snapshot_date)
-    elif backend == "clickhouse":
-        save_clickhouse(rows, config.CH_TABLE, snapshot_date)
-    elif backend != "csv":
-        log.warning("Неизвестный STORAGE=%r, сохраняю только в CSV", backend)
+    db_error: Optional[StorageError] = None
+    try:
+        if backend == "postgres":
+            save_postgres(rows, config.PG_DSN, config.PG_TABLE, snapshot_date)
+        elif backend == "clickhouse":
+            save_clickhouse(rows, config.CH_TABLE, snapshot_date)
+        elif backend != "csv":
+            log.warning("Неизвестный STORAGE=%r, сохраняю только в CSV", backend)
+    except StorageError as exc:
+        db_error = exc
+        log.error("В %s записать не удалось (%s) - сохраняю хотя бы CSV", backend, exc)
 
     try:
         save_csv(rows, csv_path)
     except StorageError as exc:
+        if db_error is not None:
+            raise StorageError("{}; CSV тоже не записан: {}".format(db_error, exc)) from exc
         if backend == "csv":
             raise
         log.error("Данные в %s записаны, но CSV сохранить не удалось: %s", backend, exc)
+    if db_error is not None:
+        raise db_error

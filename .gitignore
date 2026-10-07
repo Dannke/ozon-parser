@@ -15,4 +15,5 @@ __pycache__/
 # Результаты и логи прогонов
 data/
 logs/
+backups/
 *.tmp

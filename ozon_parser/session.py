@@ -75,16 +75,23 @@ def is_logged_in(path: Path) -> bool:
     return refresh_reason(path) is None
 
 
-def load_session(path: Path) -> dict:
+def load_session(path: Path) -> Optional[dict]:
     """Читает состояние сессии для ``browser.new_context(storage_state=...)``.
 
-    :raises SessionError: файла нет или он повреждён.
+    Вход для карточек ozon.ru не нужен: без файла (None) или без токенов в нём
+    парсер работает как гость. Проверено 06.10.2026: сессия от 25.09 при
+    загрузке страницы сбрасывалась в гостевую, а прогоны шли 1200 из 1200.
+
+    :raises SessionError: файл есть, но повреждён (например, Docker подменил
+        отсутствующий файл каталогом).
     """
+    if not path.exists():
+        log.info("Файла сессии %s нет - работаю без входа в аккаунт", path.name)
+        return None
     state = read_state(path)
     cookies = state.get("cookies") or []
     if not has_auth_cookies(cookies):
-        log.warning("В %s нет токенов авторизации - часть данных Ozon может "
-                    "не отдать. Обновите сессию: python get_cookies.py --force", path)
+        log.info("В %s нет токенов авторизации - работаю без входа в аккаунт", path.name)
     log.info("Загружено cookies: %s", len(cookies))
     return state
 

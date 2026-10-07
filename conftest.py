@@ -19,3 +19,14 @@ if ROOT not in sys.path:
 # вроде "SKU 0000000000" перемешиваются с записями настоящих прогонов.
 # Задаётся до импорта пакета: логгеры создаются при импорте модулей.
 os.environ.setdefault("OZON_LOG_DIR", tempfile.mkdtemp(prefix="ozon-parser-test-logs-"))
+
+# Оповещения в тестах выключены, даже если они настроены в .env: пустые
+# значения в окружении сильнее файла (load_dotenv не трогает заданные
+# переменные), и ни один тест не напишет в настоящий Telegram.
+for _name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "HEALTHCHECK_URL"):
+    os.environ[_name] = ""
+
+# Предел частоты открытия страниц (PAGE_INTERVAL) в тестах выключен: иначе
+# каждая проверка с браузером ждала бы по 6,5 с. Сам предел проверяется
+# отдельно (tests/test_parse_run.py).
+os.environ["PAGE_INTERVAL"] = "0"

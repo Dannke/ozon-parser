@@ -113,6 +113,34 @@ def test_unknown_category_name():
         parse_settings(VALID).category("tv")
 
 
+def test_parser_and_backup_defaults_keep_old_behaviour():
+    """Без новых ключей конвейер работает как раньше: API, описание каждый день, без копий."""
+    settings = parse_settings(VALID)
+    assert (settings.parser.price_source, settings.parser.details_refresh_days) == ("api", 1)
+    assert settings.backup.enabled is False and settings.backup.keep == 14
+    assert settings.backup.directory == settings_module.DEFAULT_BACKUP_DIR
+
+    data = copy.deepcopy(VALID)
+    data.update(parser={"price_source": "html", "details_refresh_days": 7},
+                backup={"enabled": True, "dir": "D:/ozon-backups", "keep": 3})
+    custom = parse_settings(data)
+    assert (custom.parser.price_source, custom.parser.details_refresh_days) == ("html", 7)
+    assert custom.backup.enabled and custom.backup.keep == 3
+    assert custom.backup.directory.name == "ozon-backups"
+
+
+@pytest.mark.parametrize("section, values, message", [
+    ("parser", {"price_source": "graphql"}, "price_source"),
+    ("parser", {"details_refresh_days": -1}, "details_refresh_days"),
+    ("backup", {"keep": 0}, "keep"),
+])
+def test_invalid_parser_and_backup(section, values, message):
+    data = copy.deepcopy(VALID)
+    data[section] = values
+    with pytest.raises(SettingsError, match=message):
+        parse_settings(data)
+
+
 def test_block_retry_defaults_and_limits():
     """Повтор после блокировки включён по умолчанию, но не чаще раза в полчаса."""
     schedule = parse_settings(VALID).schedule

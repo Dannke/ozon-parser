@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -18,11 +19,12 @@ from ozon_parser.parse import SkuOutcome
 from ozon_parser.settings import parse_settings
 from ozon_parser.warehouse import Warehouse
 
-SETTINGS = parse_settings({
+SETTINGS_DATA = {
     "discovery": {"categories": [{"name": "phones", "panel_size": 5,
                                   "url": "https://www.ozon.ru/category/smartfony-15502/"}]},
     "parser": {"min_success_rate": 0.5},
-})
+}
+SETTINGS = parse_settings(SETTINGS_DATA)
 
 
 class FakeWarehouse(Warehouse):
@@ -34,6 +36,7 @@ class FakeWarehouse(Warehouse):
         self.products: list = []
         self.errors: list = []
         self.runs: dict = {}
+        self.without_details: set = set()
 
     def try_parse_lock(self):
         return not self.locked
@@ -58,10 +61,15 @@ class FakeWarehouse(Warehouse):
     def record_error(self, run_id, sku, error_type, message, attempts=None):
         self.errors.append((sku, error_type))
 
+    def skus_without_details(self, skus):
+        return set(self.without_details)
 
-def scripted_browser(results: dict):
+
+def scripted_browser(results: dict, seen_options: Optional[list] = None):
     """parse_in_browser, который отдаёт заранее заданные итоги SKU."""
     def run_session(progress, state, total, flush_batch):
+        if seen_options is not None:
+            seen_options.append(progress.options)
         while progress.pending:
             sku = progress.pending.pop(0)
             kind = results.get(sku, "ok")
@@ -133,16 +141,55 @@ def test_blocked_run_has_its_own_exit_code(monkeypatch):
     assert report.exit_code == pipeline.EXIT_BLOCKED != 1
 
 
-def test_missing_session_is_visible_in_run_accounting(monkeypatch):
-    """parse.run выходит сразу, но SKU не пропадают из учёта молча."""
-    def no_session(path):
-        raise session.SessionError("Файл cookies не найден")
+def test_broken_session_is_visible_in_run_accounting(monkeypatch):
+    """parse.run выходит сразу, но SKU не пропадают из учёта молча.
 
-    monkeypatch.setattr(session, "load_session", no_session)
+    Отсутствие файла сессии - не ошибка (карточки открываются без входа), а
+    повреждённый файл (например, каталог вместо него от Docker) - ошибка.
+    """
+    def broken_session(path):
+        raise session.SessionError("Файл cookies повреждён")
+
+    monkeypatch.setattr(session, "load_session", broken_session)
     wh = FakeWarehouse()
     report = pipeline.run_parse(wh, ["1"], SETTINGS)
     assert wh.errors == [("1", "not_processed")]
     assert report.status == "failed"
+
+
+def test_parser_settings_reach_the_browser_loop(monkeypatch):
+    """price_source и расписание описаний из config.yaml доходят до разбора SKU."""
+    seen: list = []
+    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}, seen))
+    settings = parse_settings({
+        "discovery": SETTINGS_DATA["discovery"],
+        "parser": {"price_source": "html", "details_refresh_days": 0},
+    })
+    wh = FakeWarehouse()
+    wh.without_details = {"2"}
+    pipeline.run_parse(wh, ["1", "2"], settings)
+
+    (options,) = seen
+    assert options.price_source == "html"
+    assert [options.wants_details(sku) for sku in ("1", "2")] == [False, True]
+
+
+def test_details_are_spread_over_the_week():
+    """Раз в N дней - у каждого SKU ровно один день из N, а не вся panel разом."""
+    wh = FakeWarehouse()
+    wh.without_details = {"new"}
+    skus = [str(1_000_000 + n) for n in range(700)]
+    week = [pipeline.details_schedule(wh, skus + ["new"], 7, dt.date(2026, 10, 6) +
+                                      dt.timedelta(days=day)) for day in range(7)]
+
+    assert all(due is not None for due in week)
+    assert all(sum(sku in due for due in week if due) == 1 for sku in skus)
+    assert all("new" in due for due in week if due)   # без описания - каждый день
+    assert 60 < len((week[0] or set()) - {"new"}) < 140  # около 1/7 panel в день
+
+    # Раз в день - всем (None), без запроса к базе; 0 - только SKU без описания.
+    assert pipeline.details_schedule(wh, skus, 1) is None
+    assert pipeline.details_schedule(wh, skus + ["new"], 0) == {"new"}
 
 
 def test_second_parallel_run_is_refused():

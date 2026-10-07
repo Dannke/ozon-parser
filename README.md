@@ -42,8 +42,9 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 Рабочая схема: **PostgreSQL — в Docker, парсинг — на хосте в Google Chrome**
 (в контейнере Ozon блокирует браузер на карточках товаров).
 
-Нужны Python 3.9+, Docker Desktop, Google Chrome и Gmail, привязанный к
-аккаунту Ozon. Подробная инструкция — [docs/installation.md](docs/installation.md).
+Нужны Python 3.9+, Docker Desktop и Google Chrome. Вход в аккаунт Ozon для
+сбора не нужен: вход через Gmail (`get_cookies.py`) оставлен на будущее.
+Подробная инструкция — [docs/installation.md](docs/installation.md).
 
 1. Окружение:
 
@@ -63,23 +64,17 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
    pip install -e ".[postgres]"
    ```
 
-2. Настройки: скопируйте `.env.example` в `.env` и задайте `OZON_EMAIL`,
+2. Настройки: скопируйте `.env.example` в `.env` и задайте
    `BROWSER_CHANNEL=chrome`, `POSTGRES_PASSWORD` и
    `PG_DSN=postgresql://ozon:<пароль>@127.0.0.1:5433/ozon`.
 
-3. Сессия Ozon (код подтверждения читается из Gmail):
-
-   ```bash
-   python get_cookies.py
-   ```
-
-4. База:
+3. База:
 
    ```bash
    docker compose up -d
    ```
 
-5. Panel и замер скорости:
+4. Panel и замер скорости:
 
    ```bash
    python -m ozon_parser discover
@@ -89,8 +84,9 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
    python -m ozon_parser benchmark
    ```
 
-6. Ежедневный прогон через Планировщик заданий Windows (время — из
-   `config.yaml`):
+5. Ежедневный прогон через Планировщик заданий Windows (время — из
+   `config.yaml`). После прогона задача снимает резервную копию базы в
+   `backups/`:
 
    ```bash
    powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
@@ -107,6 +103,7 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 | `python -m ozon_parser runs`         | Последние прогоны и их статус |
 | `python -m ozon_parser panel`        | Состав panel по категориям |
 | `python -m ozon_parser benchmark`    | Замер скорости и расчёт дневной ёмкости |
+| `python -m ozon_parser backup`       | Резервная копия базы в `backups/` |
 | `python parse_ozon.py --file skus.txt` | Старый сценарий: список SKU → CSV / БД |
 
 Все команды и флаги — [docs/cli.md](docs/cli.md).
@@ -115,8 +112,12 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 
 - Panel: 4 категории × 300 SKU (чехлы, смартфоны, кофемашины, аксессуары для
   струнных инструментов).
-- Скорость: 8,7–9,2 SKU/мин, полная panel — около 2,3 ч
-  ([замеры](docs/performance.md)).
+- Скорость: 8,6–9,2 SKU/мин, полная panel — около 2,3 ч
+  ([замеры](docs/performance.md)). Быстрее не нужно: 07.10.2026 при ~14
+  карточках в минуту Ozon показал капчу на 14-й минуте, поэтому карточки
+  открываются не чаще раза в 6,5 с (`PAGE_INTERVAL`).
+- Вход в аккаунт Ozon не нужен: с пустым `cookies.json` 07.10.2026 собрано
+  989 из 989 SKU без капчи.
 - Ежедневный прогон — на хосте в 08:45 МСК; компьютер должен быть включён и не
   уходить в сон.
 - Полные прогоны 02–04.10.2026: 1200 из 1200 SKU за 2,2–2,8 ч. 01.10 и 05.10

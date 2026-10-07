@@ -68,7 +68,7 @@ def scripted(monkeypatch):
     calls: list = []
 
     def use(results: dict):
-        def outcome(page, sku, retries):
+        def outcome(page, sku, retries, options=None):
             calls.append(sku)
             kind = results.get(sku, "fetch_error")
             if kind == "ok":
@@ -138,7 +138,7 @@ def test_failed_antibot_check_is_not_retried(monkeypatch):
     """Каждая попытка стоит 30 с ожидания - при блокировке повторять тот же SKU незачем."""
     attempts: list = []
 
-    def blocked_page(page, sku):
+    def blocked_page(page, sku, options=None):
         attempts.append(sku)
         raise parse.ChallengeFailed("SKU {}: антибот-проверка не прошла".format(sku))
 
@@ -152,7 +152,7 @@ def test_failed_antibot_check_is_not_retried(monkeypatch):
 def test_ordinary_fetch_errors_are_still_retried(monkeypatch):
     attempts: list = []
 
-    def flaky(page, sku):
+    def flaky(page, sku, options=None):
         attempts.append(sku)
         raise parse.FetchError("SKU {}: данные карточки не найдены".format(sku))
 

@@ -187,11 +187,14 @@ def stub_context(api_status: int = 200):
         browser_utils.close_quietly(context)
 
 
-def _parse(sku: str, api_status: int = 200) -> dict:
+def _parse(sku: str, api_status: int = 200, options=None, requests=None) -> dict:
+    """Разбор SKU в контексте с заглушками; requests собирает адреса запросов."""
     with stub_context(api_status) as context:
+        if requests is not None:
+            context.on("request", lambda request: requests.append(request.url))
         page = context.new_page()
         page.goto("https://www.ozon.ru/", wait_until="domcontentloaded")
-        return parse.parse_sku(page, sku)
+        return parse.parse_sku(page, sku, options)
 
 
 # --------------------------------------------------- проверки без браузера --
@@ -275,6 +278,32 @@ def test_parse_sku_reads_fields_from_api():
     assert product["price"] == 12490.0
     assert product["photos_seller"] == 3  # дубль из мобильной галереи отброшен
     assert product["videos_seller"] == 1
+    assert product["details"] is True  # обе части карточки, как в старом сценарии
+
+
+def test_html_mode_does_not_touch_api():
+    """Режим html: цена и название - из HTML карточки, запросов к API нет."""
+    requests: list = []
+    options = parse.ParseOptions(price_source="html", details_for=frozenset())
+    product = _parse("2359066702", options=options, requests=requests)
+
+    assert product["source"] == extract.SOURCE_HTML
+    assert (product["title"], product["price"]) == ("Кресло из HTML", 9990.0)
+    assert product["details"] is False
+    assert not [url for url in requests if "entrypoint-api" in url]
+
+
+def test_html_mode_adds_description_when_due():
+    """Описание и характеристики (вторая часть) догружаются из API, цена - из HTML."""
+    requests: list = []
+    options = parse.ParseOptions(price_source="html", details_for=frozenset({"2359066702"}))
+    product = _parse("2359066702", options=options, requests=requests)
+
+    assert product["price"] == 9990.0
+    assert product["details"] is True
+    assert (product["art_set"], product["has_rich_content"]) == ("CH-545-GREY", True)
+    api = [url for url in requests if "entrypoint-api" in url]
+    assert len(api) == 1 and "layout_page_index%3D2" in api[0]
 
 
 def test_missing_sku_gives_none_without_retries():
@@ -396,7 +425,7 @@ def test_save_session_writes_storage_state():
             session.save_session(context, path)
             state = session.load_session(path)
             assert session.is_logged_in(path)
-    assert "cookies" in state
+    assert state is not None and "cookies" in state
 
 
 def test_parsed_product_lands_in_csv():

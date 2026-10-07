@@ -16,8 +16,11 @@ BASE = {"discovery": {"categories": [
      "panel_size": 5}]}}
 
 
-def settings(**schedule):
-    return parse_settings(dict(BASE, schedule=dict({"daily_at": "05:30"}, **schedule)))
+def settings(backup=None, **schedule):
+    data = dict(BASE, schedule=dict({"daily_at": "05:30"}, **schedule))
+    if backup is not None:
+        data["backup"] = backup
+    return parse_settings(data)
 
 
 def at_msk(hour, minute, day=29):
@@ -145,6 +148,52 @@ def test_no_retry_without_time_left(monkeypatch):
                              clock=clock, sleep=clock.sleep)
     assert code == EXIT_BLOCKED
     assert len(calls) == 1 and clock.slept == 0
+
+
+def with_backup():
+    return settings(backup={"enabled": True}, ensure_session=False)
+
+
+def recorded_reports(monkeypatch) -> list:
+    reports: list = []
+    monkeypatch.setattr(scheduler.notify, "report_job",
+                        lambda code, backup_ok, summary=None: reports.append((code, backup_ok)))
+    return reports
+
+
+def test_backup_and_report_run_once_after_retries(monkeypatch):
+    """Копия базы и оповещение - один раз, после повтора, с итоговым кодом parse."""
+    clock = FakeClock()
+    steps = []
+    codes = iter([EXIT_BLOCKED, 0, 0])  # parse, повтор parse, backup
+
+    def fake_run(command, **kwargs):
+        steps.append(command[3])
+        return subprocess.CompletedProcess(command, next(codes))
+
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+    reports = recorded_reports(monkeypatch)
+    assert scheduler.run_job(with_backup(), clock=clock, sleep=clock.sleep) == 0
+    assert steps == ["parse", "parse", "backup"]
+    assert reports == [(0, True)]
+
+
+def test_failed_backup_is_reported_but_keeps_parse_code(monkeypatch):
+    codes = iter([0, 1])  # parse, backup
+    monkeypatch.setattr(scheduler.subprocess, "run",
+                        lambda command, **kwargs: subprocess.CompletedProcess(command, next(codes)))
+    reports = recorded_reports(monkeypatch)
+    assert scheduler.run_job(with_backup()) == 0
+    assert reports == [(0, False)]
+
+
+def test_report_without_backup(monkeypatch):
+    """Копия выключена - в оповещение уходит None, а не «не создана»."""
+    monkeypatch.setattr(scheduler.subprocess, "run",
+                        lambda command, **kwargs: subprocess.CompletedProcess(command, 1))
+    reports = recorded_reports(monkeypatch)
+    assert scheduler.run_job(settings(ensure_session=False)) == 1
+    assert reports == [(1, None)]
 
 
 def test_retry_repeats_session_step(monkeypatch):

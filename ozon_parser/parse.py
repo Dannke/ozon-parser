@@ -1,26 +1,32 @@
 """Парсинг карточек товаров ozon.ru по списку SKU.
 
-Скрипт поднимает браузер с сохранённой сессией (см. get_cookies.py) и для
-каждого SKU забирает данные карточки.
+Скрипт поднимает браузер (с сохранённой сессией, если она есть, - см.
+get_cookies.py; для карточек вход не нужен) и для каждого SKU забирает
+данные карточки.
 
 Почему браузер, а не requests. Ozon закрыт антибот-защитой: запрос из
 requests.Session даже с действующими cookies получает HTTP 403 - и на API,
 и на HTML-страницу. Защита проверяет, что запрос сделан настоящим браузером
-(JS-проверка, отпечаток TLS), поэтому сессия поднимается в Playwright: cookies
+(JS-проверка, отпечаток TLS), поэтому работа идёт в Playwright: cookies
 из cookies.json загружаются в контекст браузера так же, как в
 requests.Session загружался бы cookie jar.
 
 Откуда берутся данные:
-  1. Основной путь - внутренний JSON-эндпоинт, из которого фронтенд Ozon
-     собирает страницу:
-         /api/entrypoint-api.bx/page/json/v2?url=/product/<sku>/
-     Карточка отдаётся двумя запросами: во втором (layout_page_index=2)
-     лежат описание и полные характеристики. Запрос проходит только из
-     вкладки, где уже открыта карточка этого товара, иначе Ozon отвечает 403.
-  2. Запасной путь - JSON, встроенный в HTML самой карточки: состояния
-     виджетов в атрибутах data-state и блок JSON-LD (см. extract.py). В нём
-     нет описания и полных характеристик, поэтому art_set и has_rich_content
-     остаются пустыми.
+  * внутренний JSON-эндпоинт, из которого фронтенд Ozon собирает страницу:
+        /api/entrypoint-api.bx/page/json/v2?url=/product/<sku>/
+    Карточка отдаётся двумя запросами: во втором (layout_page_index=2)
+    лежат описание и полные характеристики. Запрос проходит только из
+    вкладки, где уже открыта карточка этого товара, иначе Ozon отвечает 403;
+  * JSON, встроенный в HTML самой карточки: состояния виджетов в атрибутах
+    data-state и блок JSON-LD (см. extract.py). Там есть всё, кроме описания
+    и полных характеристик.
+
+Режим (ParseOptions.price_source) решает, что основное, а что запасное:
+  api  - сначала API, затем HTML (старый сценарий parse_ozon.py: 12 полей
+         задания в каждой записи);
+  html - сначала HTML: страница всё равно открывается, а запросы к API и
+         ожидание полной загрузки уже не нужны (конвейер). Вторая часть
+         карточки запрашивается, только когда она нужна этому SKU.
 
 Запуск:
     python parse_ozon.py                               # SKU из config.DEFAULT_SKUS
@@ -46,7 +52,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from . import browser as browser_utils
 from . import cli, config, constants, session, storage
-from .extract import parse_html, parse_product
+from .extract import embedded_page_json, parse_html, parse_product, product_from_embedded
 from .logger import get_logger
 
 log = get_logger("parse_ozon")
@@ -93,6 +99,42 @@ class ChallengeFailed(FetchError):
 
 class BrowserGone(RuntimeError):
     """Браузер закрылся или упал - нужен перезапуск."""
+
+
+@dataclass(frozen=True)
+class ParseOptions:
+    """Как разбирать карточку: одинаково для всех SKU прогона."""
+
+    # constants.PRICE_SOURCE_API или PRICE_SOURCE_HTML (см. шапку модуля).
+    price_source: str = constants.PRICE_SOURCE_API
+    # Каким SKU нужна вторая часть карточки: описание и полные
+    # характеристики (art_set, has_rich_content). None - всем, как в старом
+    # сценарии. Конвейер спрашивает её по расписанию (pipeline.details_schedule):
+    # это лишний запрос к Ozon на каждый товар, а меняется она редко.
+    details_for: Optional[frozenset] = None
+
+    def wants_details(self, sku: str) -> bool:
+        return self.details_for is None or sku in self.details_for
+
+
+# Когда открывалась последняя страница Ozon (time.monotonic) - для PAGE_INTERVAL.
+_last_page_open: Optional[float] = None
+
+
+def wait_page_slot() -> None:
+    """Ждёт, пока с открытия прошлой страницы пройдёт PAGE_INTERVAL.
+
+    Темп задаёт частота страниц, а не скорость разбора: 07.10.2026 разбор из
+    HTML при той же паузе 3 с ускорил обход до ~14 карточек в минуту, и пришла
+    капча. Ожидание стоит перед каждым page.goto, поэтому предел держится и
+    при повторах SKU, и при прогреве после перезапуска браузера.
+    """
+    global _last_page_open
+    if _last_page_open is not None and config.PAGE_INTERVAL > 0:
+        wait = config.PAGE_INTERVAL - (time.monotonic() - _last_page_open)
+        if wait > 0:
+            time.sleep(wait)
+    _last_page_open = time.monotonic()
 
 
 def api_url(sku: str, page_index: int = 1) -> str:
@@ -166,23 +208,23 @@ def fetch_page_json(page: Page, sku: str, page_index: int = 1) -> dict:
     return data
 
 
-def open_product_page(page: Page, sku: str) -> str:
-    """Открывает карточку товара и возвращает её HTML."""
+def open_product_page(page: Page, sku: str, settle: bool = True) -> str:
+    """Открывает карточку товара и возвращает её HTML.
+
+    :param settle: дождаться, пока страница устоится (settle_page), - это
+        нужно перед запросами к API из вкладки. Для разбора одного HTML ждать
+        незачем: сервер отдаёт первую часть карточки уже отрисованной.
+    """
     url = config.PRODUCT_URL_TEMPLATE.format(sku=sku)
+    wait_page_slot()
     log.info("SKU %s: открываю %s", sku, url)
     response = page.goto(url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
     if response is not None and response.status == 404:
         raise ProductNotFound("SKU {}: страница вернула HTTP 404".format(sku))
     if not browser_utils.pass_challenge(page, response):
         raise ChallengeFailed("SKU {}: антибот-проверка не прошла".format(sku))
-
-    # Даём странице устояться: сразу после domcontentloaded Ozon нередко делает
-    # ещё один переход, и запрос к API падает на уничтоженном контексте.
-    try:
-        page.wait_for_load_state("load", timeout=config.LOAD_STATE_TIMEOUT)
-    except PlaywrightTimeout:
-        log.debug("SKU %s: страница не догрузилась полностью, продолжаю", sku)
-    page.wait_for_timeout(config.PAGE_SETTLE_MS)
+    if settle:
+        settle_page(page, sku)
 
     # HTML, отданный сервером, - если после антибот-проверки страница
     # перезагрузилась, актуален уже отрисованный документ.
@@ -194,33 +236,66 @@ def open_product_page(page: Page, sku: str) -> str:
     return page.content()
 
 
-def fetch_card_data(page: Page, sku: str) -> dict:
-    """Забирает обе части карточки и склеивает состояния виджетов в один объект.
+def settle_page(page: Page, sku: str) -> None:
+    """Даёт странице устояться перед запросами к API из неё.
 
-    Вторая часть необязательна: без неё карточка разберётся, но поля art_set и
-    has_rich_content останутся пустыми - данных для них в первой части нет.
+    Сразу после domcontentloaded Ozon нередко делает ещё один переход, и
+    запрос к API падает на уничтоженном контексте.
     """
-    data = fetch_page_json(page, sku)
+    try:
+        page.wait_for_load_state("load", timeout=config.LOAD_STATE_TIMEOUT)
+    except PlaywrightTimeout:
+        log.debug("SKU %s: страница не догрузилась полностью, продолжаю", sku)
+    page.wait_for_timeout(config.PAGE_SETTLE_MS)
 
+
+def fetch_details(page: Page, sku: str) -> Optional[dict]:
+    """Состояния виджетов второй части карточки: описание и полные характеристики.
+
+    None - не получены: карточка разберётся и без них, но art_set и
+    has_rich_content останутся неизвестными.
+    """
     try:
         extra = fetch_page_json(page, sku, page_index=2)
     except (FetchError, ProductNotFound) as exc:
         log.warning("SKU %s: описание и полные характеристики не получены (%s)", sku, exc)
-        return data
-
-    states = dict(data.get("widgetStates") or {})
-    states.update(extra.get("widgetStates") or {})
-    data["widgetStates"] = states
-    return data
+        return None
+    return extra.get("widgetStates") or {}
 
 
-def parse_sku(page: Page, sku: str) -> dict:
-    """Собирает данные по одному SKU: сначала через API, затем из HTML."""
-    # Карточку открываем всегда: без неё внутренний API отдаёт 403.
-    html = open_product_page(page, sku)
+def html_is_enough(product: dict) -> bool:
+    """В HTML нашлась карточка: название и цена (или явное «нет в наличии»)."""
+    return bool(product.get("title")) and (
+        bool(product.get("price")) or product.get("is_available") is False)
 
+
+def parse_sku(page: Page, sku: str, options: Optional[ParseOptions] = None) -> dict:
+    """Собирает данные по одному SKU (порядок источников - см. шапку модуля)."""
+    options = options or ParseOptions()
+    details = options.wants_details(sku)
+    if options.price_source != constants.PRICE_SOURCE_HTML:
+        # Карточку открываем всегда: без неё внутренний API отдаёт 403.
+        return parse_from_api(page, sku, open_product_page(page, sku), details)
+
+    html = open_product_page(page, sku, settle=False)
+    embedded = embedded_page_json(html)
+    product = product_from_embedded(embedded, sku)
+    if not html_is_enough(product):
+        log.warning("SKU %s: в HTML карточки нет названия или цены, беру данные из API", sku)
+        settle_page(page, sku)
+        return parse_from_api(page, sku, html, details)
+    if not details:
+        return product
+    settle_page(page, sku)
+    extra = fetch_details(page, sku)
+    return product if extra is None else product_from_embedded(embedded, sku, extra)
+
+
+def parse_from_api(page: Page, sku: str, html: str, details: bool) -> dict:
+    """Данные из внутреннего API, а если он не помог - из JSON в HTML карточки."""
     try:
-        product = parse_product(fetch_card_data(page, sku), sku)
+        data = fetch_page_json(page, sku)
+        product = parse_product(data, sku, fetch_details(page, sku) if details else None)
         # Пустой заголовок обычно значит, что вернулась заглушка, а не карточка.
         if product.get("title"):
             return product
@@ -261,7 +336,8 @@ def error_type_of(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-def parse_sku_outcome(page: Page, sku: str, retries: int) -> SkuOutcome:
+def parse_sku_outcome(page: Page, sku: str, retries: int,
+                      options: Optional[ParseOptions] = None) -> SkuOutcome:
     """Разбирает SKU с повторами при временных ошибках и сообщает, чем кончилось.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
@@ -270,7 +346,7 @@ def parse_sku_outcome(page: Page, sku: str, retries: int) -> SkuOutcome:
     for attempt in range(1, retries + 2):
         outcome.attempts = attempt
         try:
-            product = parse_sku(page, sku)
+            product = parse_sku(page, sku, options)
             log.info(
                 "SKU %s: готово (%s) | %s | цена=%s | рейтинг=%s | отзывов=%s | фото=%s | видео=%s",
                 sku,
@@ -344,6 +420,7 @@ class RunProgress:
     failed: list = field(default_factory=list)
     saved: int = 0
     observer: RunObserver = field(default_factory=RunObserver)
+    options: ParseOptions = field(default_factory=ParseOptions)
     # Предохранитель: сколько SKU подряд не дали данных (из них - подряд не
     # прошли антибот-проверку) и не пора ли остановиться.
     consecutive_failures: int = 0
@@ -402,11 +479,14 @@ def save_results(rows: list, backend: str, output: Optional[Path],
         return False
 
 
-def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch) -> None:
+def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
+                     flush_batch) -> None:
     """Обходит оставшиеся SKU в одном экземпляре браузера.
 
     SKU снимается с очереди только после обработки: если браузер упадёт на
     нём, после перезапуска он будет обработан заново.
+
+    :param state: сохранённая сессия (cookies.json); None - без неё.
     """
     with sync_playwright() as playwright:
         browser = browser_utils.launch(playwright)
@@ -416,6 +496,7 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
             # Прогрев: главная выдаёт антибот-cookies, без них карточки
             # открываются через проверку.
             log.info("Прогреваю сессию на ozon.ru")
+            wait_page_slot()
             response = page.goto("https://www.ozon.ru/", wait_until="domcontentloaded",
                                  timeout=config.PAGE_TIMEOUT)
             browser_utils.pass_challenge(page, response)
@@ -426,7 +507,7 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
                 index = total - len(progress.pending) + 1
                 log.info("--- [%s/%s] SKU %s ---", index, total, sku)
                 started = time.monotonic()
-                outcome = parse_sku_outcome(page, sku, config.MAX_RETRIES)
+                outcome = parse_sku_outcome(page, sku, config.MAX_RETRIES, progress.options)
                 progress.pending.pop(0)
                 progress.record(outcome, time.monotonic() - started)
                 flush_batch()
@@ -436,7 +517,8 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
                               progress.consecutive_failures, len(progress.pending))
                     return
 
-                # Пауза между товарами, чтобы не долбить сайт очередью запросов.
+                # Пауза между товарами, чтобы не долбить сайт очередью запросов;
+                # частоту страниц дополнительно держит wait_page_slot.
                 if progress.pending:
                     time.sleep(config.REQUEST_DELAY)
         finally:
@@ -445,7 +527,8 @@ def parse_in_browser(progress: RunProgress, state: dict, total: int, flush_batch
 
 def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         snapshot_date: Optional[dt.date] = None, batch_size: Optional[int] = None,
-        min_success_rate: float = 0.0, observer: Optional[RunObserver] = None) -> int:
+        min_success_rate: float = 0.0, observer: Optional[RunObserver] = None,
+        options: Optional[ParseOptions] = None) -> int:
     """Парсит список SKU и сохраняет результат. Возвращает код возврата процесса.
 
     :param snapshot_date: дата среза для таблиц БД (по умолчанию сегодня).
@@ -454,6 +537,8 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         upsert по (sku, parsed_date), CSV переписывается целиком и атомарно.
     :param min_success_rate: минимальная доля успешных SKU от длины входа.
     :param observer: получает итог каждого SKU сразу после его обработки.
+    :param options: как разбирать карточки; по умолчанию - как старый
+        сценарий (API, обе части карточки у каждого SKU).
     """
     if not skus:
         log.error("Список SKU пуст")
@@ -466,7 +551,8 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         return 1
 
     batch_size = config.BATCH_SIZE if batch_size is None else batch_size
-    progress = RunProgress(pending=list(skus), observer=observer or RunObserver())
+    progress = RunProgress(pending=list(skus), observer=observer or RunObserver(),
+                           options=options or ParseOptions())
     log.info("К обработке SKU: %s", len(skus))
 
     def flush_batch() -> None:

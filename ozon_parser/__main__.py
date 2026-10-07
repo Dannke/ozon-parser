@@ -6,6 +6,7 @@
     parse       прогон парсера по panel (или --file / SKU аргументами)
     benchmark   замер скорости на случайных SKU из panel и расчёт ёмкости
     runs        последние прогоны парсера и объём истории
+    backup      резервная копия базы (pg_dump в контейнере postgres)
     schedule    ежедневный запуск (для docker-compose); --once - один прогон
 
 Старые точки входа не меняются: parse_ozon.py, get_cookies.py и
@@ -19,7 +20,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from . import discovery, pipeline, scheduler
+from . import backup, discovery, pipeline, scheduler
 from .db import DatabaseError
 from .logger import get_logger
 from .settings import Settings, SettingsError, load_settings
@@ -186,6 +187,17 @@ def cmd_runs(args, settings: Settings) -> int:
     return 0
 
 
+def cmd_backup(args, settings: Settings) -> int:
+    # Базу не трогаем через PG_DSN: pg_dump работает внутри контейнера.
+    try:
+        path = backup.create_backup(settings.backup.directory, settings.backup.keep)
+    except backup.BackupError as exc:
+        log.error("Резервная копия не создана: %s", exc)
+        return 1
+    print("Резервная копия: {} ({:.1f} МБ)".format(path, path.stat().st_size / 2**20))
+    return 0
+
+
 def cmd_schedule(args, settings: Settings) -> int:
     # Схему готовим сразу при старте контейнера, а не в момент первого прогона.
     with _warehouse():
@@ -234,6 +246,9 @@ def build_parser() -> argparse.ArgumentParser:
     runs = commands.add_parser("runs", help="последние прогоны парсера")
     runs.add_argument("--limit", type=int, default=10)
     runs.set_defaults(func=cmd_runs)
+
+    commands.add_parser("backup", help="резервная копия базы (backup в config.yaml)"
+                        ).set_defaults(func=cmd_backup)
 
     schedule = commands.add_parser("schedule", help="ежедневный запуск")
     schedule.add_argument("--once", action="store_true", help="выполнить прогон сейчас и выйти")
