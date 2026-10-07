@@ -17,3 +17,6 @@ data/
 logs/
 backups/
 *.tmp
+
+# Claude Code: настройки агента на этой машине, в git не хранятся.
+.claude/

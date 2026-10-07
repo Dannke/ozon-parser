@@ -8,6 +8,7 @@ credentials.json
 .git/
 .venv/
 .vscode/
+.claude/
 __pycache__/
 *.py[cod]
 .pytest_cache/
