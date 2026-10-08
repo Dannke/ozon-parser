@@ -3,14 +3,16 @@
 Сделано для docker-compose: контейнер parser живёт постоянно и раз в сутки
 (schedule.daily_at) выполняет те же шаги, что Airflow DAG:
 
-    ensure_session (если включён)  ->  parse (panel)  ->  backup  ->  оповещение
+    оповещение о начале  ->  ensure_session (если включён)  ->  parse (panel)
+    ->  backup  ->  оповещение об итоге
 
 Если Ozon остановил прогон (parse вышел с кодом EXIT_BLOCKED), прогон
 повторяется через schedule.block_retry_delay_hours, не больше
-schedule.block_retries раз. Повтор берёт только SKU, у которых за текущий день
-ещё нет наблюдения (parse --missing-today), а весь прогон с повторами
-укладывается в schedule.parse_timeout_hours. Резервная копия базы (если
-backup.enabled) и оповещение (notify.py) - один раз, после всех повторов.
+schedule.block_retries раз, и об этом уходит отдельное оповещение. Повтор
+берёт только SKU, у которых за текущий день ещё нет наблюдения (parse
+--missing-today), а весь прогон с повторами укладывается в
+schedule.parse_timeout_hours. Резервная копия базы (если backup.enabled) и
+оповещение об итоге (notify.py) - один раз, после всех повторов.
 
 Каждый шаг - отдельный процесс. Браузер и драйвер Playwright умирают вместе
 с процессом прогона, так что утечка памяти или зависший Chromium не
@@ -32,7 +34,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import backup, config, notify
 from .logger import get_logger
-from .pipeline import EXIT_BLOCKED
+from .pipeline import EXIT_BLOCKED, format_duration
 from .settings import Settings
 from .warehouse import Warehouse
 
@@ -50,6 +52,10 @@ MIN_RETRY_WINDOW_SECONDS = 3600
 # свой предел backup.TIMEOUT_SECONDS. Копия в несколько мегабайт снимается за
 # секунды - это страховка от зависшего Docker.
 BACKUP_TIMEOUT_SECONDS = 2 * backup.TIMEOUT_SECONDS + 60
+
+# Сколько последних прогонов просматривать в поисках сегодняшнего daily для
+# итога: между ним и концом задачи бывают ручные parse и benchmark.
+RECENT_RUNS_FOR_SUMMARY = 10
 
 
 def get_timezone(name: str) -> dt.tzinfo:
@@ -132,12 +138,13 @@ def _run_steps(settings: Settings, deadline: float, clock) -> int:
 
 
 def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
-    """Один ежедневный прогон с повторами после блокировки, копией базы и оповещением.
+    """Один ежедневный прогон с повторами после блокировки, копией базы и оповещениями.
 
-    Возвращает код возврата последнего шага parse: ни копия, ни оповещение
+    Возвращает код возврата последнего шага parse: ни копия, ни оповещения
     его не меняют.
     """
     schedule = settings.schedule
+    notify.report_start(details=lambda: start_details(settings))
     deadline = clock() + schedule.parse_timeout_hours * 3600
     code = _run_steps(settings, deadline, clock)
     for attempt in range(1, schedule.block_retries + 1):
@@ -151,12 +158,14 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
             break
         log.warning("Прогон остановлен блокировкой Ozon - повтор %s из %s в %s",
                     attempt, schedule.block_retries, _clock_time(retry_at, settings))
+        notify.report_retry(_clock_time(retry_at, settings), attempt, schedule.block_retries,
+                            details=lambda: day_progress(settings))
         _sleep_until(retry_at, clock, sleep)
         code = _run_steps(settings, deadline, clock)
 
     # Копия снимается и после неудачного прогона: собранное за день уже в базе.
     backup_ok = _run_backup() if settings.backup.enabled else None
-    notify.report_job(code, backup_ok, summary=last_run_summary)
+    notify.report_job(code, backup_ok, summary=lambda: job_summary(settings))
     return code
 
 
@@ -167,19 +176,77 @@ def _run_backup() -> bool:
                      lambda: "{} с".format(BACKUP_TIMEOUT_SECONDS)) == 0
 
 
-def last_run_summary() -> str:
-    """Строка о последнем прогоне из parse_runs - для оповещения; пусто, если базы нет."""
+# ------------------------------------------------------- тексты оповещений --
+def format_progress(panel_total: int, missing: int) -> str:
+    collected = panel_total - missing
+    return "За сегодня собрано {} из {} SKU panel".format(collected, panel_total)
+
+
+def format_run(row: tuple, error_counts: list) -> str:
+    """Строка о прогоне из parse_runs (порядок полей - Warehouse.recent_runs)."""
+    run_id, kind, status, _started, total, ok, errors, duration, speed = row[:9]
+    text = "Прогон {} ({}): {}, успешно {} из {}, ошибок {}".format(
+        run_id, kind, status, ok, total, errors)
+    if duration is not None:
+        text += ", {}".format(format_duration(float(duration)))
+    if speed is not None:
+        text += ", {} SKU/мин".format(speed)
+    if error_counts:
+        text += "\nОшибки: " + ", ".join(
+            "{} {}".format(error_type, count) for error_type, count in error_counts)
+    return text
+
+
+def _read_db(settings: Settings, read: Callable[[Warehouse, dt.datetime], str]) -> str:
+    """Текст для оповещения из базы; пусто, если база недоступна."""
+    tz = get_timezone(settings.schedule.timezone)
+    since = day_start(dt.datetime.now(dt.timezone.utc), tz)
     try:
         with Warehouse() as wh:
-            rows = wh.recent_runs(1)
+            return read(wh, since)
     except Exception as exc:  # noqa: BLE001 - оповещение не должно падать из-за базы
-        log.debug("Итог последнего прогона не прочитан: %s", exc)
+        log.debug("Данные для оповещения не прочитаны: %s", exc)
         return ""
-    if not rows:
-        return ""
-    run_id, kind, status, _started, total, ok, errors = rows[0][:7]
-    return "Прогон {} ({}): {}, успешно {} из {}, ошибок {}".format(
-        run_id, kind, status, ok, total, errors)
+
+
+def _progress(wh: Warehouse, since: dt.datetime) -> str:
+    total = len(wh.active_panel_skus())
+    return format_progress(total, len(wh.panel_skus(missing_since=since))) if total else ""
+
+
+def start_details(settings: Settings) -> str:
+    """Для оповещения о начале: сколько SKU panel осталось собрать за день."""
+    def read(wh: Warehouse, since: dt.datetime) -> str:
+        total = len(wh.active_panel_skus())
+        if not total:
+            return "Panel пуста - нужен python -m ozon_parser discover"
+        missing = len(wh.panel_skus(missing_since=since))
+        if not missing:
+            return "Все {} SKU panel за сегодня уже собраны".format(total)
+        return "К сбору {} из {} SKU panel".format(missing, total)
+    return _read_db(settings, read)
+
+
+def day_progress(settings: Settings) -> str:
+    """Для оповещения о повторе: сколько SKU уже собрано за день."""
+    return _read_db(settings, _progress)
+
+
+def job_summary(settings: Settings) -> str:
+    """Для оповещения об итоге: собрано за день, последний ежедневный прогон, его ошибки.
+
+    Берётся только сегодняшний прогон с kind=daily: ручной parse или benchmark
+    после него - не итог задачи, а если parse сегодня собирать было нечего,
+    строки о прогоне нет вовсе.
+    """
+    def read(wh: Warehouse, since: dt.datetime) -> str:
+        lines = [_progress(wh, since)]
+        daily = [row for row in wh.recent_runs(RECENT_RUNS_FOR_SUMMARY)
+                 if row[1] == "daily" and row[3] >= since]
+        if daily:
+            lines.append(format_run(daily[0], wh.error_counts(daily[0][0])))
+        return "\n".join(line for line in lines if line)
+    return _read_db(settings, read)
 
 
 def serve(settings: Settings, once: bool = False, clock=time.time) -> int:

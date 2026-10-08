@@ -8,6 +8,7 @@
     runs        последние прогоны парсера и объём истории
     backup      резервная копия базы (pg_dump в контейнере postgres)
     schedule    ежедневный запуск (для docker-compose); --once - один прогон
+    notify      проверить связку с Telegram-ботом или узнать id чата
 
 Старые точки входа не меняются: parse_ozon.py, get_cookies.py и
 check_snapshot.py работают как раньше и не требуют ни PostgreSQL, ни config.yaml.
@@ -20,7 +21,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from . import backup, discovery, pipeline, scheduler
+from . import backup, config, discovery, notify, pipeline, scheduler
 from .db import DatabaseError
 from .logger import get_logger
 from .settings import Settings, SettingsError, load_settings
@@ -205,6 +206,40 @@ def cmd_schedule(args, settings: Settings) -> int:
     return scheduler.serve(settings, once=args.once)
 
 
+def cmd_notify(args, settings: Settings) -> int:
+    # База не нужна: команда проверяет только настройки Telegram в .env.
+    if not config.TELEGRAM_BOT_TOKEN:
+        print("TELEGRAM_BOT_TOKEN не задан в .env: токен выдаёт @BotFather "
+              "(docs/operations.md, «Оповещения»)")
+        return 1
+    if not config.TELEGRAM_CHAT_ID:
+        chats = notify.find_chats()
+        if chats is None:
+            print("Telegram не ответил - причина в logs/notify.log")
+            return 1
+        if not chats:
+            print("Боту ещё никто не писал: отправьте ему любое сообщение и повторите команду")
+            return 1
+        print("Чаты, которые писали боту, - нужный id впишите в TELEGRAM_CHAT_ID в .env:")
+        for chat_id, name in chats:
+            print("  {:<16} {}".format(chat_id, name))
+        return 0
+    # Задержанные из-за сети сообщения уходят перед проверочным; само оно в
+    # очередь не встаёт - результат виден сразу.
+    queued = len(notify.load_outbox())
+    if not notify.send_telegram("✅ Ozon parser: оповещения настроены, бот на связи",
+                                queue=False):
+        print("Сообщение не отправлено - причина в logs/notify.log")
+        left = len(notify.load_outbox())
+        if left:
+            print("Задержанных сообщений в очереди: {}".format(left))
+        return 1
+    print("Проверочное сообщение отправлено в Telegram")
+    if queued:
+        print("Перед ним отправлены задержанные сообщения из очереди: {}".format(queued))
+    return 0
+
+
 # ------------------------------------------------------------------ разбор --
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m ozon_parser",
@@ -253,6 +288,9 @@ def build_parser() -> argparse.ArgumentParser:
     schedule = commands.add_parser("schedule", help="ежедневный запуск")
     schedule.add_argument("--once", action="store_true", help="выполнить прогон сейчас и выйти")
     schedule.set_defaults(func=cmd_schedule)
+
+    commands.add_parser("notify", help="проверить Telegram-бота: тестовое сообщение или id чата"
+                        ).set_defaults(func=cmd_notify)
     return parser
 
 
@@ -262,14 +300,21 @@ def main(argv=None) -> int:
         settings = load_settings(args.config)
         return args.func(args, settings)
     except SettingsError as exc:
-        log.error("Настройки: %s", exc)
+        problem = "Настройки: {}".format(exc)
     except DatabaseError as exc:
-        log.error("PostgreSQL: %s (проверьте PG_DSN в .env и что база запущена)", exc)
+        problem = "PostgreSQL: {} (проверьте PG_DSN в .env и что база запущена)".format(exc)
     except (discovery.DiscoveryError, pipeline.ParseLockBusy, FileNotFoundError) as exc:
-        log.error("%s", exc)
+        problem = str(exc)
     except KeyboardInterrupt:
         log.warning("Прервано пользователем")
         return 130
+    log.error("%s", problem)
+    if args.command == "schedule" and args.once:
+        # Ежедневная задача Windows упала до прогона (не запущен Docker, сломан
+        # config.yaml): иначе об этом узнали бы только из лога. Цикл контейнера
+        # (без --once) не пишет: Docker перезапускает его, и сообщение уходило
+        # бы на каждом перезапуске.
+        notify.report_failure(problem)
     return 1
 
 

@@ -60,7 +60,7 @@
 | `ozon_parser/pipeline.py`        | Прогон парсера с учётом в `parse_runs`, benchmark                |
 | `ozon_parser/scheduler.py`       | Ежедневный прогон: `schedule --once` и цикл для контейнера       |
 | `ozon_parser/backup.py`          | Резервная копия базы: `pg_dump` в контейнере, проверка, ротация  |
-| `ozon_parser/notify.py`          | Оповещения: пульс мониторинга и сообщение в Telegram о проблемах |
+| `ozon_parser/notify.py`          | Оповещения: пульс мониторинга и сообщения в Telegram о начале, повторе, итоге и сбое прогона; очередь сообщений, не ушедших из-за сети |
 | `ozon_parser/settings.py`        | Чтение и проверка `config.yaml`                                  |
 | `scripts/run_daily.ps1`          | Ежедневный прогон на Windows (Chrome без окна)                   |
 | `scripts/register_windows_task.ps1` | Регистрация задачи в Планировщике заданий Windows             |
