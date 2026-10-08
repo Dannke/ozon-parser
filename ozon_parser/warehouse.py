@@ -476,6 +476,15 @@ class Warehouse:
                 (run_id, sku, error_type, (message or "")[:2000], attempts))
         self.run(insert)
 
+    def error_counts(self, run_id: int) -> list:
+        """Ошибки прогона по типам: [(error_type, число)], самые частые первыми."""
+        def query(cursor) -> list:
+            cursor.execute(
+                "SELECT error_type, count(*) FROM parse_errors WHERE run_id = %s "
+                "GROUP BY error_type ORDER BY count(*) DESC, error_type", (run_id,))
+            return [tuple(row) for row in cursor.fetchall()]
+        return self.run(query)
+
     def recent_runs(self, limit: int = 10) -> list:
         def query(cursor) -> list:
             cursor.execute(

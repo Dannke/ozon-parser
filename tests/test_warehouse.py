@@ -175,6 +175,16 @@ def test_errors_and_run_totals_are_recorded(wh):
     assert run[0] == "partial" and float(run[1]) == 50.0 and float(run[2]) == 61.2
 
 
+def test_error_counts_by_type_for_notification(wh):
+    run_id = wh.start_parse_run("daily", "panel", 4, 3.0)
+    other = wh.start_parse_run("daily", "panel", 1, 3.0)
+    wh.record_error(run_id, "1", "timeout", "таймаут", 3)
+    wh.record_error(run_id, "2", "blocked", "прогон остановлен", None)
+    wh.record_error(run_id, "3", "blocked", "прогон остановлен", None)
+    wh.record_error(other, "4", "not_found", "HTTP 404", 1)
+    assert wh.error_counts(run_id) == [("blocked", 2), ("timeout", 1)]
+
+
 def test_parse_lock_is_exclusive_and_stale_runs_are_closed(wh):
     stale = wh.start_parse_run("daily", "panel", 5, 3.0)
     other = Warehouse(TEST_DSN)

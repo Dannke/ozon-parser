@@ -1,4 +1,4 @@
-"""Ежедневный планировщик: время следующего запуска и шаги прогона."""
+"""Ежедневный планировщик: время следующего запуска, шаги прогона, оповещения."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from ozon_parser import scheduler
+from ozon_parser.db import DatabaseError
 from ozon_parser.pipeline import EXIT_BLOCKED
 from ozon_parser.settings import parse_settings
 
@@ -208,3 +209,116 @@ def test_retry_repeats_session_step(monkeypatch):
     monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
     assert scheduler.run_job(settings(), clock=clock, sleep=clock.sleep) == 0
     assert commands == [True, False, True, False]
+
+
+def test_job_reports_start_retry_and_result(monkeypatch):
+    """Оповещения прогона: начало, повтор после блокировки, итог - по порядку."""
+    clock = FakeClock()
+    scripted_parse(monkeypatch, clock, [EXIT_BLOCKED, 0])
+    events: list = []
+    monkeypatch.setattr(scheduler.notify, "report_start",
+                        lambda details: events.append("start"))
+    monkeypatch.setattr(scheduler.notify, "report_retry",
+                        lambda retry_at, attempt, attempts, details: events.append(
+                            ("retry", retry_at, attempt, attempts)))
+    monkeypatch.setattr(scheduler.notify, "report_job",
+                        lambda code, backup_ok, summary: events.append(("result", code)))
+
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
+                             sleep=clock.sleep) == 0
+    # Повтор - через 3 ч после конца первого шага: старт 1_000_000 + 1800 с.
+    retry_at = dt.datetime.fromtimestamp(1_000_000 + 1800 + 3 * 3600, MSK).strftime("%H:%M")
+    assert events == ["start", ("retry", retry_at + " MSK", 1, 1), ("result", 0)]
+
+
+def test_run_summary_text():
+    row = (15, "daily", "partial", None, 1200, 1150, 50, 8100.0, 8.9, 6.7, 3.0)
+    text = scheduler.format_run(row, [("blocked", 45), ("timeout", 5)])
+    assert text == ("Прогон 15 (daily): partial, успешно 1150 из 1200, ошибок 50, "
+                    "2h 15m 00s, 8.9 SKU/мин\nОшибки: blocked 45, timeout 5")
+    # Прерванный прогон: длительности и скорости может не быть.
+    row = (16, "daily", "interrupted", None, 1200, 10, 0, None, None, None, 3.0)
+    assert scheduler.format_run(row, []) == (
+        "Прогон 16 (daily): interrupted, успешно 10 из 1200, ошибок 0")
+    assert scheduler.format_progress(1200, 52) == "За сегодня собрано 1148 из 1200 SKU panel"
+
+
+def test_summaries_are_empty_without_database(monkeypatch):
+    """Оповещение уходит и без подробностей, если база не отвечает."""
+    def broken():
+        raise DatabaseError("Ошибка PostgreSQL: connection refused")
+
+    monkeypatch.setattr(scheduler, "Warehouse", broken)
+    assert scheduler.start_details(settings()) == ""
+    assert scheduler.job_summary(settings()) == ""
+
+
+def run_schedule(monkeypatch, *argv) -> list:
+    """python -m ozon_parser schedule при недоступной базе; что ушло в report_failure."""
+    from ozon_parser import __main__ as cli
+
+    def broken():
+        raise DatabaseError("Ошибка PostgreSQL: connection refused")
+
+    failures: list = []
+    monkeypatch.setattr(cli, "Warehouse", broken)
+    monkeypatch.setattr(cli, "load_settings", lambda path: settings())
+    monkeypatch.setattr(cli.notify, "report_failure", failures.append)
+    assert cli.main(["schedule", *argv]) == 1
+    return failures
+
+
+def test_daily_task_reports_database_failure(monkeypatch):
+    (problem,) = run_schedule(monkeypatch, "--once")
+    assert "connection refused" in problem and "PG_DSN" in problem
+
+
+def test_container_loop_does_not_report_on_restart(monkeypatch):
+    assert run_schedule(monkeypatch) == []
+
+
+class SummaryWarehouse:
+    """Warehouse для сводки итога: panel из 3 SKU, прогоны новые - первыми."""
+
+    def __init__(self, runs):
+        self.runs = runs
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def active_panel_skus(self):
+        return {"1", "2", "3"}
+
+    def panel_skus(self, missing_since=None):
+        return ["3"]
+
+    def recent_runs(self, limit):
+        return self.runs[:limit]
+
+    def error_counts(self, run_id):
+        return [("timeout", 1)] if run_id == 7 else []
+
+
+def run_row(run_id, kind, started):
+    return (run_id, kind, "partial", started, 3, 2, 1, 600.0, 9.0, 6.6, 3.0)
+
+
+def test_summary_reports_todays_daily_run_not_a_later_manual_one(monkeypatch):
+    now = dt.datetime.now(dt.timezone.utc)
+    runs = [run_row(8, "benchmark", now), run_row(7, "daily", now)]
+    monkeypatch.setattr(scheduler, "Warehouse", lambda: SummaryWarehouse(runs))
+    summary = scheduler.job_summary(settings())
+    assert summary.splitlines()[0] == "За сегодня собрано 2 из 3 SKU panel"
+    assert "Прогон 7 (daily)" in summary and "Ошибки: timeout 1" in summary
+    assert "Прогон 8" not in summary
+
+
+def test_summary_skips_yesterdays_run(monkeypatch):
+    """Сегодня собирать было нечего - вчерашний прогон за итог не выдаётся."""
+    yesterday = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)
+    monkeypatch.setattr(scheduler, "Warehouse",
+                        lambda: SummaryWarehouse([run_row(7, "daily", yesterday)]))
+    assert scheduler.job_summary(settings()) == "За сегодня собрано 2 из 3 SKU panel"
