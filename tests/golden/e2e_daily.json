@@ -1,0 +1,96 @@
+{
+  "exit_codes": [
+    0,
+    1
+  ],
+  "parse_errors": [
+    {
+      "attempts": 1,
+      "error_type": "not_found",
+      "run_id": 1,
+      "sku": "404404"
+    },
+    {
+      "attempts": 1,
+      "error_type": "not_found",
+      "run_id": 2,
+      "sku": "404404"
+    }
+  ],
+  "parse_runs": [
+    {
+      "error_count": 1,
+      "kind": "daily",
+      "processed_count": 3,
+      "request_delay": "0.00",
+      "run_id": 1,
+      "sku_source": "panel",
+      "status": "partial",
+      "success_count": 2,
+      "total_sku": 3
+    },
+    {
+      "error_count": 1,
+      "kind": "daily",
+      "processed_count": 1,
+      "request_delay": "0.00",
+      "run_id": 2,
+      "sku_source": "panel",
+      "status": "failed",
+      "success_count": 0,
+      "total_sku": 1
+    }
+  ],
+  "price_history": [
+    {
+      "card_price": "11240.00",
+      "discount_pct": "37.52",
+      "is_available": true,
+      "old_price": "19990.00",
+      "price": "12490.00",
+      "rating": "4.80",
+      "reviews_total": 1253,
+      "run_id": 1,
+      "sku": "1001",
+      "source": "api"
+    },
+    {
+      "card_price": null,
+      "discount_pct": null,
+      "is_available": null,
+      "old_price": null,
+      "price": "59.00",
+      "rating": "4.20",
+      "reviews_total": 7,
+      "run_id": 1,
+      "sku": "1002",
+      "source": "api"
+    }
+  ],
+  "products": [
+    {
+      "art_set": "CH-545-GREY",
+      "color": "серый",
+      "cover_image": "https://cdn1.ozone.ru/s3/multimedia-1/cover.jpg",
+      "has_rich_content": true,
+      "last_run_id": 1,
+      "material": "экокожа",
+      "photos_seller": 3,
+      "sku": "1001",
+      "title": "Кресло офисное компьютерное, серый",
+      "videos_seller": 1
+    },
+    {
+      "art_set": null,
+      "color": null,
+      "cover_image": "https://cdn1.ozone.ru/s3/pen.jpg",
+      "has_rich_content": false,
+      "last_run_id": 1,
+      "material": null,
+      "photos_seller": 1,
+      "sku": "1002",
+      "title": "Ручка шариковая",
+      "videos_seller": 0
+    }
+  ]
+}
