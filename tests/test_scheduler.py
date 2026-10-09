@@ -6,10 +6,10 @@ import datetime as dt
 import subprocess
 import sys
 
-from ozon_parser import scheduler
-from ozon_parser.db import DatabaseError
-from ozon_parser.pipeline import EXIT_BLOCKED
-from ozon_parser.settings import parse_settings
+from price_panel import scheduler
+from price_panel.db import DatabaseError
+from price_panel.pipeline import EXIT_BLOCKED
+from price_panel.settings import parse_settings
 
 MSK = scheduler.get_timezone("Europe/Moscow")
 BASE = {"discovery": {"categories": [
@@ -48,7 +48,7 @@ def test_job_steps():
     assert [name for name, _ in steps] == ["ensure_session", "parse"]
     assert steps[0][1][-2:] == ["--max-age-days", "7"]
     assert "--non-interactive" in steps[0][1]
-    assert steps[1][1] == [sys.executable, "-m", "ozon_parser", "parse", "--kind", "daily",
+    assert steps[1][1] == [sys.executable, "-m", "price_panel", "parse", "--kind", "daily",
                            "--missing-today"]
 
     steps = scheduler.job_commands(settings(ensure_session=False))
@@ -254,8 +254,8 @@ def test_summaries_are_empty_without_database(monkeypatch):
 
 
 def run_schedule(monkeypatch, *argv) -> list:
-    """python -m ozon_parser schedule при недоступной базе; что ушло в report_failure."""
-    from ozon_parser import __main__ as cli
+    """python -m price_panel schedule при недоступной базе; что ушло в report_failure."""
+    from price_panel import __main__ as cli
 
     def broken():
         raise DatabaseError("Ошибка PostgreSQL: connection refused")

@@ -94,7 +94,7 @@ Benchmark (run_id=2, status=success)
 - меньше нагрузка на Ozon.
 
 Как масштабировать: после первых ежедневных прогонов посмотреть
-`python -m ozon_parser runs` (скорость полного прогона `daily`), увеличить
+`python -m price_panel runs` (скорость полного прогона `daily`), увеличить
 `panel_size` в `config.yaml` и запустить `discover` — он доберёт недостающие
 SKU, не трогая существующие.
 

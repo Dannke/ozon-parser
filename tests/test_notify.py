@@ -16,7 +16,7 @@ from typing import Optional
 
 import pytest
 
-from ozon_parser import config, notify
+from price_panel import config, notify
 
 TOKEN = "123456:SECRET-TOKEN"
 
@@ -212,8 +212,8 @@ def test_healthcheck_url_must_be_http(monkeypatch):
 
 
 def run_notify_command(monkeypatch, capsys) -> tuple:
-    """python -m ozon_parser notify без config.yaml и базы: (код, вывод)."""
-    from ozon_parser import __main__ as cli
+    """python -m price_panel notify без config.yaml и базы: (код, вывод)."""
+    from price_panel import __main__ as cli
 
     monkeypatch.setattr(cli, "load_settings", lambda path: None)
     code = cli.main(["notify"])
@@ -373,5 +373,5 @@ def test_notify_command_delivers_queued_messages(monkeypatch, capsys, configured
     code, out = run_notify_command(monkeypatch, capsys)
     assert code == 0 and "задержанные сообщения из очереди: 1" in out
     assert [sent_text(r).splitlines()[-1] for r in requests] == [
-        "итог", "✅ Ozon parser: оповещения настроены, бот на связи"]
+        "итог", "✅ Price panel: оповещения настроены, бот на связи"]
     assert not outbox.exists()

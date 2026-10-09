@@ -7,8 +7,8 @@ import datetime as dt
 
 import pytest
 
-from ozon_parser import settings as settings_module
-from ozon_parser.settings import SettingsError, load_settings, parse_settings
+from price_panel import settings as settings_module
+from price_panel.settings import SettingsError, load_settings, parse_settings
 
 VALID = {
     "discovery": {

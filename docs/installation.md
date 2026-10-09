@@ -156,11 +156,11 @@ docker compose up -d
 Сформируйте panel, замерьте скорость, зарегистрируйте ежедневный прогон:
 
 ```bash
-python -m ozon_parser discover
+python -m price_panel discover
 ```
 
 ```bash
-python -m ozon_parser benchmark
+python -m price_panel benchmark
 ```
 
 ```bash

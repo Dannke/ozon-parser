@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from ozon_parser import discovery
-from ozon_parser.sampling import listing_position
+from price_panel import discovery
+from price_panel.sampling import listing_position
 
 # Урезанный ответ /api/entrypoint-api.bx/page/json/v2?url=/category/...?page=3
 LISTING_JSON = {

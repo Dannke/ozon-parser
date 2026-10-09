@@ -4,7 +4,7 @@
 сброс Docker Desktop стёрли бы её целиком. Копия снимается после ежедневного
 прогона (scheduler.run_job, если backup.enabled в config.yaml) и вручную:
 
-    python -m ozon_parser backup
+    python -m price_panel backup
 
 pg_dump запускается в самом контейнере (docker compose exec): на хосте
 клиента PostgreSQL нет, а внутри контейнера вход по локальному сокету не

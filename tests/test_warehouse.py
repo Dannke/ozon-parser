@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from ozon_parser import parse, warehouse
-from ozon_parser.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
-from ozon_parser.warehouse import Warehouse
+from price_panel import parse, warehouse
+from price_panel.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
+from price_panel.warehouse import Warehouse
 
 TEST_DSN = os.getenv("TEST_PG_DSN", "")
 

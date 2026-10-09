@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from ozon_parser.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
+from price_panel.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
 
 UTC = dt.timezone.utc
 

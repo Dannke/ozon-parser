@@ -1,7 +1,10 @@
-# Ozon price panel
+# Price panel
 
 Конвейер данных, который каждый день собирает цены одного и того же набора
-товаров Ozon и копит их историю в PostgreSQL для анализа.
+товаров маркетплейсов и копит их историю в PostgreSQL для анализа. Сейчас
+собирается Ozon; Wildberries — в работе (архитектура —
+[ADR 0001](docs/adr/0001-modular-monolith.md), данные —
+[ADR 0002](docs/adr/0002-multi-marketplace-data.md)).
 
 ```text
 Discovery  ->  SKU Panel  ->  Daily Parsing  ->  PostgreSQL  ->  Historical Data
@@ -79,11 +82,11 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 4. Panel и замер скорости:
 
    ```bash
-   python -m ozon_parser discover
+   python -m price_panel discover
    ```
 
    ```bash
-   python -m ozon_parser benchmark
+   python -m price_panel benchmark
    ```
 
 5. Ежедневный прогон через Планировщик заданий Windows (время — из
@@ -100,12 +103,12 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 
 | Команда                              | Что делает |
 | ------------------------------------ | ---------- |
-| `python -m ozon_parser discover`     | Найти SKU и дописать panel до `panel_size` |
-| `python -m ozon_parser parse`        | Прогон по panel с записью в PostgreSQL |
-| `python -m ozon_parser runs`         | Последние прогоны и их статус |
-| `python -m ozon_parser panel`        | Состав panel по категориям |
-| `python -m ozon_parser benchmark`    | Замер скорости и расчёт дневной ёмкости |
-| `python -m ozon_parser backup`       | Резервная копия базы в `backups/` |
+| `python -m price_panel discover`     | Найти SKU и дописать panel до `panel_size` |
+| `python -m price_panel parse`        | Прогон по panel с записью в PostgreSQL |
+| `python -m price_panel runs`         | Последние прогоны и их статус |
+| `python -m price_panel panel`        | Состав panel по категориям |
+| `python -m price_panel benchmark`    | Замер скорости и расчёт дневной ёмкости |
+| `python -m price_panel backup`       | Резервная копия базы в `backups/` |
 | `python parse_ozon.py --file skus.txt` | Старый сценарий: список SKU → CSV / БД |
 
 Все команды и флаги — [docs/cli.md](docs/cli.md).

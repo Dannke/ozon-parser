@@ -5,7 +5,7 @@
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
 
     // Корень проекта в путях поиска Pylance - чтобы резолвился пакет
-    // ozon_parser и точки входа рядом с ним.
+    // price_panel и точки входа рядом с ним.
     "python.analysis.extraPaths": [
         "${workspaceFolder}"
     ],

@@ -1,4 +1,4 @@
-"""Ежедневный запуск без внешнего планировщика: python -m ozon_parser schedule.
+"""Ежедневный запуск без внешнего планировщика: python -m price_panel schedule.
 
 Сделано для docker-compose: контейнер parser живёт постоянно и раз в сутки
 (schedule.daily_at) выполняет те же шаги, что Airflow DAG:
@@ -90,7 +90,7 @@ def job_commands(settings: Settings) -> list:
         steps.append(("ensure_session", [
             python, str(config.BASE_DIR / "get_cookies.py"), "--non-interactive",
             "--max-age-days", str(settings.schedule.session_max_age_days)]))
-    steps.append(("parse", [python, "-m", "ozon_parser", "parse", "--kind", "daily",
+    steps.append(("parse", [python, "-m", "price_panel", "parse", "--kind", "daily",
                             "--missing-today"]))
     return steps
 
@@ -171,7 +171,7 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
 
 def _run_backup() -> bool:
     """Шаг backup отдельным процессом, как остальные шаги. True - копия снята."""
-    return _run_step("backup", [sys.executable, "-m", "ozon_parser", "backup"],
+    return _run_step("backup", [sys.executable, "-m", "price_panel", "backup"],
                      BACKUP_TIMEOUT_SECONDS,
                      lambda: "{} с".format(BACKUP_TIMEOUT_SECONDS)) == 0
 
@@ -219,7 +219,7 @@ def start_details(settings: Settings) -> str:
     def read(wh: Warehouse, since: dt.datetime) -> str:
         total = len(wh.active_panel_skus())
         if not total:
-            return "Panel пуста - нужен python -m ozon_parser discover"
+            return "Panel пуста - нужен python -m price_panel discover"
         missing = len(wh.panel_skus(missing_since=since))
         if not missing:
             return "Все {} SKU panel за сегодня уже собраны".format(total)

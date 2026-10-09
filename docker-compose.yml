@@ -1,7 +1,7 @@
 # PostgreSQL + парсер.
 #
 #   docker compose up -d                                           # только база
-#   docker compose run --rm parser python -m ozon_parser discover  # сформировать panel
+#   docker compose run --rm parser python -m price_panel discover  # сформировать panel
 #
 # Ежедневный парсинг карточек сейчас идёт на хосте (scripts/run_daily.ps1 через
 # Планировщик заданий Windows): 30.09.2026 Chromium в контейнере получал от
@@ -63,7 +63,11 @@ services:
       - ./credentials.json:/app/credentials.json:ro
     # Chromium падает на стандартных 64 МБ /dev/shm.
     shm_size: 1gb
-    command: ["python", "-m", "ozon_parser", "schedule"]
+    command: ["python", "-m", "price_panel", "schedule"]
 
 volumes:
   pgdata:
+    # Имя тома закреплено: иначе compose выводит его из имени каталога проекта,
+    # и после переименования каталога создал бы новый пустой том вместо всей
+    # истории цен. Это имя - то, под которым том создан изначально.
+    name: ozon-parser_pgdata

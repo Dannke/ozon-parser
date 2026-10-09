@@ -26,8 +26,8 @@ import pytest
 from playwright.sync_api import sync_playwright
 from test_extract import FIXTURE, card_html
 
-from ozon_parser import browser as browser_utils
-from ozon_parser import extract, login, parse, session, storage
+from price_panel import browser as browser_utils
+from price_panel import extract, login, parse, session, storage
 
 # Кодировка обязательна: без неё браузер читает кириллицу заглушек как latin-1.
 HTML_TYPE = "text/html; charset=utf-8"
@@ -244,7 +244,7 @@ def test_national_number_drops_country_code():
 
 def test_login_settings_are_checked_per_method(monkeypatch):
     """Каждому способу входа - свои обязательные настройки."""
-    from ozon_parser import config
+    from price_panel import config
 
     monkeypatch.setattr(config, "OZON_EMAIL", "seller@gmail.com")
     monkeypatch.setattr(config, "OZON_PHONE", "")

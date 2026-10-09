@@ -48,7 +48,7 @@ TELEGRAM_URL = "https://api.telegram.org/bot{token}/{method}"
 # Предел Telegram - 4096 символов; сообщения прогона короче, это страховка от
 # длинного текста ошибки.
 MAX_MESSAGE_CHARS = 3500
-TITLE = "Ozon parser"
+TITLE = "Price panel"
 
 # Очередь сообщений, не ушедших из-за сети (каталог data/ не попадает в git).
 OUTBOX_FILE = config.BASE_DIR / "data" / "telegram_outbox.json"
@@ -320,7 +320,7 @@ def report_job(parse_code: int, backup_ok: Optional[bool], summary: Details = _n
     ping(not problems, opener)
     if problems:
         _send("❌ {}: {}".format(TITLE, "; ".join(problems)), summary,
-              footer="Подробности: python -m ozon_parser runs, logs/scheduler.log",
+              footer="Подробности: python -m price_panel runs, logs/scheduler.log",
               opener=opener, final=True, sleep=sleep)
         return
 

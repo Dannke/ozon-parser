@@ -51,7 +51,7 @@ discovery:
   # panel_size подобран по замеру скорости парсера (docs/performance.md,
   # «Размер panel»): 8.7 SKU/мин -> 4 x 300 = 1200 SKU за ~2.3 ч в сутки, около
   # трети 8-часового окна. Увеличение panel_size не перетасовывает panel:
-  # discover доберёт недостающие SKU. Перед этим - python -m ozon_parser benchmark.
+  # discover доберёт недостающие SKU. Перед этим - python -m price_panel benchmark.
   categories:
     - name: phone_cases
       title: "Чехлы для телефонов"
@@ -148,7 +148,7 @@ schedule:
 
 backup:
   # Резервная копия базы после ежедневного прогона (и вручную:
-  # python -m ozon_parser backup): pg_dump внутри контейнера postgres, формат
+  # python -m price_panel backup): pg_dump внутри контейнера postgres, формат
   # custom, восстанавливается pg_restore. Нужен запущенный Docker Desktop.
   enabled: true
   # Куда класть копии. Относительный путь - от корня проекта. Надёжнее другой

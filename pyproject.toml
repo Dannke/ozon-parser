@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ozon-parser"
-version = "1.2.0"
-description = "Конвейер discovery -> SKU panel -> ежедневный парсинг ozon.ru -> PostgreSQL (история цен)"
+name = "price-panel"
+version = "2.0.0"
+description = "Ежедневный сбор цен маркетплейсов: discovery -> SKU panel -> парсинг -> PostgreSQL (история цен)"
 requires-python = ">=3.9"
 dependencies = [
     "playwright==1.63.0",
@@ -33,18 +33,19 @@ dev = [
     "pyright==1.1.414",
 ]
 
+# ozon-* - точки входа старого сценария (только Ozon), имена сохранены.
 [project.scripts]
-ozon-parse = "ozon_parser.parse:main"
-ozon-login = "ozon_parser.login:main"
-ozon-check = "ozon_parser.check:main"
-ozon-pipeline = "ozon_parser.__main__:main"
+price-panel = "price_panel.__main__:main"
+ozon-parse = "price_panel.parse:main"
+ozon-login = "price_panel.login:main"
+ozon-check = "price_panel.check:main"
 
 [tool.setuptools]
-packages = ["ozon_parser"]
+packages = ["price_panel"]
 
 [tool.setuptools.package-data]
-# Миграции схемы применяются из пакета (ozon_parser.warehouse.migrate).
-ozon_parser = ["migrations/*.sql"]
+# Миграции схемы применяются из пакета (price_panel.warehouse.migrate).
+price_panel = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

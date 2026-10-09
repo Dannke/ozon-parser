@@ -13,11 +13,11 @@ from typing import Optional
 
 import pytest
 
-from ozon_parser import config, parse, pipeline, session, storage
-from ozon_parser.db import DatabaseError
-from ozon_parser.parse import SkuOutcome
-from ozon_parser.settings import parse_settings
-from ozon_parser.warehouse import Warehouse
+from price_panel import config, parse, pipeline, session, storage
+from price_panel.db import DatabaseError
+from price_panel.parse import SkuOutcome
+from price_panel.settings import parse_settings
+from price_panel.warehouse import Warehouse
 
 SETTINGS_DATA = {
     "discovery": {"categories": [{"name": "phones", "panel_size": 5,
@@ -259,7 +259,7 @@ class QueueWarehouse(FakeWarehouse):
 
 
 def run_cli(monkeypatch, wh, *argv):
-    from ozon_parser import __main__ as cli
+    from price_panel import __main__ as cli
 
     monkeypatch.setattr(cli, "Warehouse", lambda: wh)
     monkeypatch.setattr(cli, "load_settings", lambda path: SETTINGS)

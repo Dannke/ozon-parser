@@ -16,7 +16,7 @@
  config.yaml: категории, panel_size, top_ratio, расписание
         |
         v
- DISCOVERY                       python -m ozon_parser discover
+ DISCOVERY                       python -m price_panel discover
    листинг категории ozon.ru (Playwright + внутренний API фронтенда)
    или отчёт data.ozon.ru «Аналитика товаров» (опционально)
    SKU из URL карточки -> дедупликация -> top + tail_random
@@ -25,7 +25,7 @@
  SKU PANEL                       таблица sku_panel (+ data/panel_skus.csv)
         |
         v
- DAILY PARSING                   python -m ozon_parser parse
+ DAILY PARSING                   python -m price_panel parse
    ежедневно: scripts/run_daily.ps1 (Планировщик заданий Windows)
    каждый SKU: открыть карточку -> JSON API -> запасной путь JSON в HTML
         |  запись сразу после разбора SKU
@@ -52,35 +52,35 @@
 | Файл / каталог                   | Назначение                                                      |
 | -------------------------------- | --------------------------------------------------------------- |
 | `config.yaml`                    | Настройки конвейера: категории, sampling, расписание, benchmark  |
-| `ozon_parser/__main__.py`        | CLI конвейера: `python -m ozon_parser <команда>`                 |
-| `ozon_parser/discovery.py`       | Discovery: листинг ozon.ru и data.ozon.ru, отбор в panel         |
-| `ozon_parser/sampling.py`        | SKU из URL, дедупликация, выборка top + tail — без сети           |
-| `ozon_parser/warehouse.py`       | PostgreSQL: миграции, panel, запуски, история, ошибки            |
-| `ozon_parser/migrations/*.sql`   | Схема и аналитические представления (применяются сами)           |
-| `ozon_parser/pipeline.py`        | Прогон парсера с учётом в `parse_runs`, benchmark                |
-| `ozon_parser/scheduler.py`       | Ежедневный прогон: `schedule --once` и цикл для контейнера       |
-| `ozon_parser/backup.py`          | Резервная копия базы: `pg_dump` в контейнере, проверка, ротация  |
-| `ozon_parser/notify.py`          | Оповещения: пульс мониторинга и сообщения в Telegram о начале, повторе, итоге и сбое прогона; очередь сообщений, не ушедших из-за сети |
-| `ozon_parser/settings.py`        | Чтение и проверка `config.yaml`                                  |
+| `price_panel/__main__.py`        | CLI конвейера: `python -m price_panel <команда>`                 |
+| `price_panel/discovery.py`       | Discovery: листинг ozon.ru и data.ozon.ru, отбор в panel         |
+| `price_panel/sampling.py`        | SKU из URL, дедупликация, выборка top + tail — без сети           |
+| `price_panel/warehouse.py`       | PostgreSQL: миграции, panel, запуски, история, ошибки            |
+| `price_panel/migrations/*.sql`   | Схема и аналитические представления (применяются сами)           |
+| `price_panel/pipeline.py`        | Прогон парсера с учётом в `parse_runs`, benchmark                |
+| `price_panel/scheduler.py`       | Ежедневный прогон: `schedule --once` и цикл для контейнера       |
+| `price_panel/backup.py`          | Резервная копия базы: `pg_dump` в контейнере, проверка, ротация  |
+| `price_panel/notify.py`          | Оповещения: пульс мониторинга и сообщения в Telegram о начале, повторе, итоге и сбое прогона; очередь сообщений, не ушедших из-за сети |
+| `price_panel/settings.py`        | Чтение и проверка `config.yaml`                                  |
 | `scripts/run_daily.ps1`          | Ежедневный прогон на Windows (Chrome без окна)                   |
 | `scripts/register_windows_task.ps1` | Регистрация задачи в Планировщике заданий Windows             |
 | `Dockerfile`, `docker-compose.yml` | PostgreSQL; образ парсера для discover и разовых команд        |
 | `get_cookies.py`                 | Точка входа: вход на `data.ozon.ru`, сохранение cookies          |
 | `parse_ozon.py`                  | Точка входа старого сценария: список SKU → CSV / БД              |
 | `check_snapshot.py`              | Точка входа: контроль, что срез за дату попал в хранилище        |
-| `ozon_parser/login.py`           | Вход через Ozon ID (по почте или телефону) + код из Gmail        |
-| `ozon_parser/gmail.py`           | Чтение кода подтверждения через Gmail API                        |
-| `ozon_parser/session.py`         | Чтение, проверка и запись файла сессии `cookies.json`            |
-| `ozon_parser/parse.py`           | Обход списка SKU, повторы, перезапуск браузера, предохранитель, батчи |
-| `ozon_parser/extract.py`         | Разбор JSON карточки (из API и из HTML) в поля — без сети         |
-| `ozon_parser/browser.py`         | Запуск браузера, ожидание антибот-проверки                       |
-| `ozon_parser/storage.py`         | Старый сценарий: CSV / таблица PostgreSQL / ClickHouse           |
-| `ozon_parser/db.py`              | Подключения к БД и проверка имён таблиц                          |
-| `ozon_parser/check.py`           | Проверка среза за дату                                           |
-| `ozon_parser/config.py`          | Настройки из `.env` (секреты, браузер, паузы и повторы)           |
-| `ozon_parser/logger.py`          | Логирование в консоль и в `logs/*.log` с ротацией                |
-| `ozon_parser/secrets_fs.py`      | Запись файлов с секретами с правами только для владельца         |
-| `ozon_parser/cli.py`, `constants.py` | Общие аргументы командной строки и константы                 |
+| `price_panel/login.py`           | Вход через Ozon ID (по почте или телефону) + код из Gmail        |
+| `price_panel/gmail.py`           | Чтение кода подтверждения через Gmail API                        |
+| `price_panel/session.py`         | Чтение, проверка и запись файла сессии `cookies.json`            |
+| `price_panel/parse.py`           | Обход списка SKU, повторы, перезапуск браузера, предохранитель, батчи |
+| `price_panel/extract.py`         | Разбор JSON карточки (из API и из HTML) в поля — без сети         |
+| `price_panel/browser.py`         | Запуск браузера, ожидание антибот-проверки                       |
+| `price_panel/storage.py`         | Старый сценарий: CSV / таблица PostgreSQL / ClickHouse           |
+| `price_panel/db.py`              | Подключения к БД и проверка имён таблиц                          |
+| `price_panel/check.py`           | Проверка среза за дату                                           |
+| `price_panel/config.py`          | Настройки из `.env` (секреты, браузер, паузы и повторы)           |
+| `price_panel/logger.py`          | Логирование в консоль и в `logs/*.log` с ротацией                |
+| `price_panel/secrets_fs.py`      | Запись файлов с секретами с правами только для владельца         |
+| `price_panel/cli.py`, `constants.py` | Общие аргументы командной строки и константы                 |
 | `dags/ozon_parser_dag.py`        | Airflow DAG: ежедневный запуск старого сценария                  |
 | `sql/datalens_views.sql`         | Витрины DataLens для таблицы старого сценария                    |
 | `tests/`                         | Тесты (`pytest`), см. [development.md](development.md)           |
@@ -180,7 +180,7 @@ Rich-описание у Ozon бывает двух видов, и оба учи
   недоступной базе CSV всё равно пишется, а ошибка базы потом поднимается
   наверх, чтобы прогон не выглядел успешным.
 
-В конвейере (`python -m ozon_parser parse`) дополнительно:
+В конвейере (`python -m price_panel parse`) дополнительно:
 
 - каждый SKU пишется в PostgreSQL сразу после разбора, до следующего SKU;
   проблемный SKU не останавливает прогон, его причина попадает в
