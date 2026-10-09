@@ -30,6 +30,13 @@
 | [discovery.md](discovery.md)             | Источники SKU, алгоритм, темп запросов, sampling, dataset bias |
 | [performance.md](performance.md)         | Замеры скорости и выбор размера panel |
 
+## Архитектурные решения
+
+| Решение | Суть |
+| ------- | ---- |
+| [ADR 0001](adr/0001-modular-monolith.md) | Модульный монолит вместо отдельных проектов и оркестратора |
+| [ADR 0002](adr/0002-multi-marketplace-data.md) | Данные маркетплейсов — в общих таблицах с колонкой `marketplace` |
+
 ## Отчёты
 
 | Документ                                 | Что внутри |

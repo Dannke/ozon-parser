@@ -4,18 +4,30 @@
 
 - [Окружение](#окружение)
 - [Тесты](#тесты)
+  - [Эталоны](#эталоны)
 - [Линтер и типы](#линтер-и-типы)
+- [CI](#ci)
 - [Миграции](#миграции)
 - [Документация](#документация)
 
 ## Окружение
 
 ```bash
-pip install -e ".[dev,postgres]"
+pip install -e ".[dev,postgres,clickhouse]"
 ```
 
-`dev` ставит pytest, ruff и pyright. Установка проекта и браузера — в
+`dev` ставит pytest, ruff и pyright; `clickhouse` нужен pyright, чтобы
+проверить бэкенд ClickHouse старого сценария. Установка проекта и браузера — в
 [installation.md](installation.md).
+
+Ежедневный прогон идёт из основного рабочего дерева — с той ветки, что в нём
+выгружена. Поэтому разработку удобно вести в отдельном git worktree **со своим
+`.venv`**: прод тогда не видит ни незаконченной ветки, ни пакетов из
+разработки.
+
+```bash
+git worktree add ../ozon-parser-dev -b <ветка> main
+```
 
 ## Тесты
 
@@ -23,7 +35,7 @@ pip install -e ".[dev,postgres]"
 pytest
 ```
 
-268 проверок в 22 файлах. Тесты не ходят в сеть и не отправляют оповещений,
+270 проверок в 24 файлах. Тесты не ходят в сеть и не отправляют оповещений,
 даже если они настроены в `.env` (`conftest.py` выключает их):
 
 - `test_pipeline.py` использует настоящий браузер, но все ответы Ozon
@@ -34,12 +46,18 @@ pytest
 
 Логи тестов пишутся во временный каталог (`OZON_LOG_DIR`), а не в `logs/`.
 
-Двенадцать проверок `test_warehouse.py` работают с настоящим PostgreSQL и
-запускаются, только если задан `TEST_PG_DSN`. Имя базы должно содержать
-`test`: фикстура пересоздаёт схему `public`.
+Четырнадцать проверок работают с настоящим PostgreSQL: двенадцать в
+`test_warehouse.py` и оба эталона. Без `TEST_PG_DSN` они пропускаются. Имя
+базы должно содержать `test`, потому что фикстура `wh` (`conftest.py`)
+пересоздаёт схему `public`. Безопаснее всего одноразовый контейнер на
+отдельном порту — боевую базу на 5433 он не трогает:
 
 ```bash
-TEST_PG_DSN=postgresql://ozon:change-me@localhost:5433/ozon_test pytest
+docker run -d --name pricepanel-testdb -p 127.0.0.1:5434:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=pricepanel_test postgres:16-alpine
+```
+
+```bash
+TEST_PG_DSN=postgresql://postgres@127.0.0.1:5434/pricepanel_test pytest
 ```
 
 | Файл                           | Проверок | Что покрывает                                                       |
@@ -66,9 +84,28 @@ TEST_PG_DSN=postgresql://ozon:change-me@localhost:5433/ozon_test pytest
 | `tests/test_check_snapshot.py` |  6 | Шаг контроля: свежий, пустой, устаревший и отсутствующий CSV              |
 | `tests/test_db.py`             |  4 | Разбор и проверка имён таблиц                                             |
 | `tests/test_parse_run.py`      |  7 | Перезапуск упавшего браузера, батчи, доля успеха, темп по частоте карточек |
+| `tests/test_golden_views.py`   |  1 | Эталон ответов всех аналитических представлений на фиксированной истории |
+| `tests/test_e2e_daily.py`      |  1 | Эталон сквозного ежедневного `parse`: panel → браузер → заглушка Ozon → строки в базе, коды возврата |
 
 Тесты **не** проверяют ClickHouse, живой Airflow, Docker и живой ozon.ru.
 Живые проверки ведутся в [verification-log.md](verification-log.md).
+
+### Эталоны
+
+`test_golden_views.py` и `test_e2e_daily.py` — характеризационные тесты. Они
+фиксируют текущее поведение, а не внутреннее устройство: что отвечают
+представления и что оказывается в базе после ежедневного прогона. Поэтому
+перестройка кода должна проходить их без изменений. Эталоны лежат в
+`tests/golden/*.json`, сверку делает фикстура `golden` (`conftest.py`).
+
+Если поведение изменилось намеренно, эталон перезаписывают:
+
+```bash
+UPDATE_GOLDEN=1 TEST_PG_DSN=postgresql://postgres@127.0.0.1:5434/pricepanel_test pytest tests/test_golden_views.py tests/test_e2e_daily.py
+```
+
+Затем дифф `tests/golden/` проверяют глазами и коммитят вместе с изменением:
+в нём должно быть ровно то, что задумано.
 
 ## Линтер и типы
 
@@ -82,6 +119,13 @@ pyright
 
 Pyright проверяет типы с теми же настройками, что и Pylance в VS Code
 (`[tool.pyright]` в `pyproject.toml`). Правила ruff — там же.
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) на каждый PR и push в `main`
+запускает ruff, pyright и все тесты на Python 3.11. Тестовую базу даёт
+сервис PostgreSQL, браузер ставит Playwright, поэтому проверки базы и эталоны
+в CI не пропускаются. В сеть тесты по-прежнему не ходят.
 
 ## Миграции
 

@@ -2,7 +2,7 @@
 
 Проверки без базы сверяют SQL и подготовку параметров. Проверки с базой
 запускаются, если задан TEST_PG_DSN, и только на базе, в имени которой есть
-"test": фикстура каждый раз пересоздаёт схему public.
+"test": фикстура wh (conftest.py) каждый раз пересоздаёт схему public.
 
     TEST_PG_DSN=postgresql://ozon:ozon@localhost:5433/ozon_test pytest tests/test_warehouse.py
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import tempfile
-import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -77,19 +76,6 @@ def test_slow_attributes_wait_for_the_description():
 
 
 # ------------------------------------------------------------- с базой -----
-@pytest.fixture
-def wh():
-    if not TEST_DSN:
-        pytest.skip("TEST_PG_DSN не задан")
-    if "test" not in urllib.parse.urlsplit(TEST_DSN).path:
-        pytest.skip("TEST_PG_DSN должен указывать на тестовую базу (имя содержит 'test')")
-    store = Warehouse(TEST_DSN)
-    store.run(lambda cursor: cursor.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
-    assert store.migrate()
-    yield store
-    store.close()
-
-
 def picks(*skus, group=GROUP_TOP, page=1):
     return [PanelPick(Candidate(sku=s, position=i + 1, page=page), group)
             for i, s in enumerate(skus)]
