@@ -1,0 +1,7 @@
+# Коммиты только с форматированием: git blame их пропускает, если включить
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub учитывает файл сам). PR с такими коммитами вливаются merge-коммитом,
+# не squash: иначе хеш ниже перестанет существовать.
+
+# style: apply ruff format
+5e4a59f72ecde9efda19dadfad85e8d50a601789

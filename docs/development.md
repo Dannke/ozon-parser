@@ -107,23 +107,38 @@ UPDATE_GOLDEN=1 TEST_PG_DSN=postgresql://postgres@127.0.0.1:5434/pricepanel_test
 Затем дифф `tests/golden/` проверяют глазами и коммитят вместе с изменением:
 в нём должно быть ровно то, что задумано.
 
-## Линтер и типы
+## Линтер, формат и типы
 
 ```bash
 ruff check .
 ```
 
 ```bash
+ruff format .
+```
+
+```bash
 pyright
 ```
 
+Код форматирует `ruff format`, вручную стиль не выравнивается. CI проверяет
+формат (`ruff format --check`), так что неотформатированный код в `main` не
+попадёт. Коммит, которым код отформатирован впервые, записан в
+`.git-blame-ignore-revs`. Чтобы `git blame` его пропускал, достаточно одной
+команды на клон:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 Pyright проверяет типы с теми же настройками, что и Pylance в VS Code
-(`[tool.pyright]` в `pyproject.toml`). Правила ruff — там же.
+(`[tool.pyright]` в `pyproject.toml`). Правила ruff — там же. Целевая версия —
+Python 3.11.
 
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) на каждый PR и push в `main`
-запускает ruff, pyright и все тесты на Python 3.11. Тестовую базу даёт
+запускает ruff (линтер и формат), pyright и все тесты на Python 3.11. Тестовую базу даёт
 сервис PostgreSQL, браузер ставит Playwright, поэтому проверки базы и эталоны
 в CI не пропускаются. В сеть тесты по-прежнему не ходят.
 
