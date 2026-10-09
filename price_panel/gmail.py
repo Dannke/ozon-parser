@@ -27,7 +27,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
@@ -111,7 +111,7 @@ class GmailCodeReader:
         self.settings = settings
         # Клиент Gmail API. Его методы (users(), messages() ...) создаются
         # динамически из описания API, поэтому статически он типизируется как Any.
-        self._service: Optional[Any] = None
+        self._service: Any | None = None
 
     # --------------------------------------------------------------- доступ --
     def _authorize(self) -> Credentials:
@@ -137,7 +137,7 @@ class GmailCodeReader:
             log.warning("Не удалось сохранить токен: %s", exc)
         return creds
 
-    def _load_saved_token(self) -> Optional[Credentials]:
+    def _load_saved_token(self) -> Credentials | None:
         """Учётные данные из token.json; None - файла нет или он повреждён."""
         token_file = self.settings.token_file
         if not token_file.exists():
@@ -149,7 +149,7 @@ class GmailCodeReader:
             return None
 
     @staticmethod
-    def _refresh(creds: Credentials) -> Optional[Credentials]:
+    def _refresh(creds: Credentials) -> Credentials | None:
         """Обновляет протухший токен без участия человека; None - не вышло."""
         try:
             log.info("Обновляю истёкший токен Gmail")
@@ -287,7 +287,7 @@ class GmailCodeReader:
         return HTML_ENTITY_RE.sub(" ", clean)
 
     @classmethod
-    def extract_code(cls, text: str, headline: str = "") -> Optional[str]:
+    def extract_code(cls, text: str, headline: str = "") -> str | None:
         """Достаёт код подтверждения из письма (или None, если не нашёлся).
 
         :param text: тело письма; здесь код обязан стоять рядом с ключевым словом.
@@ -326,7 +326,7 @@ class GmailCodeReader:
             raise GmailError("Ошибка поиска писем: {}".format(exc)) from exc
         return response.get("messages", [])
 
-    def _fetch_message(self, message_id: str) -> Optional[dict]:
+    def _fetch_message(self, message_id: str) -> dict | None:
         try:
             return (
                 self._api.users()
@@ -339,7 +339,7 @@ class GmailCodeReader:
             return None
 
     def _code_from_messages(self, messages: Iterable, since_ms: int,
-                            seen: Optional[set] = None) -> Optional[str]:
+                            seen: set | None = None) -> str | None:
         """Проверяет письма (от новых к старым) и возвращает первый найденный код.
 
         Идентификаторы просмотренных писем складываются в ``seen``, чтобы
@@ -380,7 +380,7 @@ class GmailCodeReader:
             log.debug("В письме %s код не распознан", message_id)
         return None
 
-    def wait_for_code(self, since_ts: float, timeout: Optional[int] = None) -> str:
+    def wait_for_code(self, since_ts: float, timeout: int | None = None) -> str:
         """Опрашивает почту, пока не придёт письмо с кодом подтверждения.
 
         Просмотренные письма запоминаются, чтобы каждая итерация опроса не

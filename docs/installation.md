@@ -16,7 +16,7 @@ discovery `data_ozon`, которому нужна сессия data.ozon.ru.
 
 ## Окружение Python
 
-Нужен Python 3.9+ (проект проверялся на 3.11) и Google Chrome для парсинга.
+Нужен Python 3.11+ и Google Chrome для парсинга.
 Создайте виртуальное окружение в корне проекта:
 
 ```bash

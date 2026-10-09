@@ -49,7 +49,7 @@ def at_msk(hour, minute, day=29):
 
 
 def test_next_run_is_today_before_daily_at():
-    now = at_msk(4, 0).astimezone(dt.timezone.utc)
+    now = at_msk(4, 0).astimezone(dt.UTC)
     assert scheduler.next_run_at(now, dt.time(5, 30), MSK) == at_msk(5, 30)
 
 
@@ -60,7 +60,7 @@ def test_next_run_is_tomorrow_after_daily_at():
 
 
 def test_unknown_timezone_falls_back_to_utc():
-    assert scheduler.get_timezone("Mars/Olympus") is dt.timezone.utc
+    assert scheduler.get_timezone("Mars/Olympus") is dt.UTC
 
 
 def test_job_steps():
@@ -98,7 +98,7 @@ def test_timeout_is_a_failure(monkeypatch):
 
 def test_day_start_is_midnight_in_schedule_timezone():
     # 23:30 UTC 28.09 - это уже 29.09 по Москве.
-    now = dt.datetime(2026, 9, 28, 23, 30, tzinfo=dt.timezone.utc)
+    now = dt.datetime(2026, 9, 28, 23, 30, tzinfo=dt.UTC)
     assert scheduler.day_start(now, MSK) == at_msk(0, 0)
 
 
@@ -353,7 +353,7 @@ def run_row(run_id, kind, started):
 
 
 def test_summary_reports_todays_daily_run_not_a_later_manual_one(monkeypatch):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     runs = [run_row(8, "benchmark", now), run_row(7, "daily", now)]
     monkeypatch.setattr(scheduler, "Warehouse", lambda: SummaryWarehouse(runs))
     summary = scheduler.job_summary(settings())
@@ -364,7 +364,7 @@ def test_summary_reports_todays_daily_run_not_a_later_manual_one(monkeypatch):
 
 def test_summary_skips_yesterdays_run(monkeypatch):
     """Сегодня собирать было нечего - вчерашний прогон за итог не выдаётся."""
-    yesterday = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)
+    yesterday = dt.datetime.now(dt.UTC) - dt.timedelta(days=2)
     monkeypatch.setattr(scheduler, "Warehouse",
                         lambda: SummaryWarehouse([run_row(7, "daily", yesterday)]))
     assert scheduler.job_summary(settings()) == "За сегодня собрано 2 из 3 SKU panel"

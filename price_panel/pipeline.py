@@ -21,7 +21,6 @@ import statistics
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Optional
 
 from . import config, parse
 from .db import DatabaseError
@@ -102,7 +101,7 @@ class ParseReport:
     errors: Counter
     processed: int
     duration: float
-    avg_sku_seconds: Optional[float]
+    avg_sku_seconds: float | None
     status: str
     exit_code: int
     request_delay: float = field(default_factory=lambda: config.REQUEST_DELAY)
@@ -112,7 +111,7 @@ class ParseReport:
         return sum(self.errors.values())
 
     @property
-    def sku_per_minute(self) -> Optional[float]:
+    def sku_per_minute(self) -> float | None:
         if self.duration <= 0 or self.processed == 0:
             return None
         return self.processed / (self.duration / 60)
@@ -133,7 +132,7 @@ def run_status(success: int, errors: Counter) -> str:
 
 
 def details_schedule(wh: Warehouse, skus: list, refresh_days: int,
-                     today: Optional[dt.date] = None) -> Optional[frozenset]:
+                     today: dt.date | None = None) -> frozenset | None:
     """Каким SKU в этом прогоне запрашивать вторую часть карточки; None - всем.
 
     Описание и полные характеристики (art_set, has_rich_content, цвет,
@@ -215,7 +214,7 @@ def run_parse(wh: Warehouse, skus: list, settings: Settings, kind: str = "manual
     return report
 
 
-def sample_panel(wh: Warehouse, size: int, seed: Optional[str] = None) -> list:
+def sample_panel(wh: Warehouse, size: int, seed: str | None = None) -> list:
     """Случайные SKU из активной panel для замера скорости."""
     skus = wh.panel_skus()
     rng = random.Random(seed)
@@ -237,7 +236,7 @@ def capacity(sku_per_minute: float, window_hours: float, safety_factor: float) -
     return int(per_window), int(per_window * safety_factor)
 
 
-def format_report(report: ParseReport, settings: Optional[Settings] = None,
+def format_report(report: ParseReport, settings: Settings | None = None,
                   title: str = "Parse run") -> str:
     errors = ", ".join("{}: {}".format(k, v) for k, v in report.errors.most_common()) or "-"
     total = report.total or 1

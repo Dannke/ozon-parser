@@ -30,7 +30,7 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Callable
+from collections.abc import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import backup, config, notify
@@ -72,7 +72,7 @@ def get_timezone(name: str) -> dt.tzinfo:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
         log.warning("Часовой пояс %r не найден (нет пакета tzdata?) - использую UTC", name)
-        return dt.timezone.utc
+        return dt.UTC
 
 
 def next_run_at(now: dt.datetime, daily_at: dt.time, tz: dt.tzinfo) -> dt.datetime:
@@ -231,7 +231,7 @@ def format_run(row: tuple, error_counts: list) -> str:
 def _read_db(settings: Settings, read: Callable[[Warehouse, dt.datetime], str]) -> str:
     """Текст для оповещения из базы; пусто, если база недоступна."""
     tz = get_timezone(settings.schedule.timezone)
-    since = day_start(dt.datetime.now(dt.timezone.utc), tz)
+    since = day_start(dt.datetime.now(dt.UTC), tz)
     try:
         with Warehouse() as wh:
             return read(wh, since)
@@ -292,7 +292,7 @@ def serve(settings: Settings, once: bool = False, clock=time.time) -> int:
         run_job(settings)
 
     while True:
-        now = dt.datetime.fromtimestamp(clock(), dt.timezone.utc)
+        now = dt.datetime.fromtimestamp(clock(), dt.UTC)
         target = next_run_at(now, settings.schedule.daily_at, tz)
         log.info("Следующий прогон: %s", target.isoformat(timespec="minutes"))
         _sleep_until(target.timestamp(), clock, time.sleep)

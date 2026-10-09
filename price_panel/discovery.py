@@ -40,8 +40,8 @@ import math
 import random
 import time
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
@@ -109,7 +109,7 @@ class CategoryResult:
     selected_top: int = 0
     selected_tail: int = 0
     already_in_panel: int = 0
-    listing_depth: Optional[int] = None
+    listing_depth: int | None = None
     note: str = ""
     seen: list = field(default_factory=list)
 
@@ -259,7 +259,7 @@ class ListingSource:
             return None, "антибот-заглушка", True
         return None, "ответ без виджетов", False
 
-    def fetch(self, category: CategoryConfig, page_number: int) -> Optional[list]:
+    def fetch(self, category: CategoryConfig, page_number: int) -> list | None:
         """Товары одной страницы выдачи; [] - выдача кончилась; None - не получили."""
         if self.blocked:
             return None
@@ -353,7 +353,7 @@ class ListingCrawl:
     top: list = field(default_factory=list)
     tail: list = field(default_factory=list)
     # Последняя непустая страница, если конец выдачи встретился.
-    depth: Optional[int] = None
+    depth: int | None = None
     # Ozon ограничил запросы и не снял ограничение: собранное - частичное.
     blocked: bool = False
     skipped_pages: int = 0
@@ -372,7 +372,7 @@ def discover_listing(source: ListingSource, category: CategoryConfig, top_needed
 
     # Top: страницы подряд с первой, пока не наберётся нужное число новых SKU.
     page_number = 0
-    last_page: Optional[int] = None
+    last_page: int | None = None
     max_top_pages = math.ceil(top_needed / 4) + 5
     while top_needed > 0 and page_number < max_top_pages:
         eligible = [c for c in dedupe(crawl.top) if c.sku not in exclude]
@@ -478,7 +478,7 @@ class BrowserSessions:
     cookies.json, как и раньше.
     """
 
-    def __init__(self, browser, storage_state: Optional[dict]):
+    def __init__(self, browser, storage_state: dict | None):
         self.browser = browser
         self.storage_state = storage_state
         self.context = None
@@ -580,7 +580,7 @@ def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfi
     return result
 
 
-def run_discovery(wh: Warehouse, settings: Settings, names: Optional[list] = None,
+def run_discovery(wh: Warehouse, settings: Settings, names: list | None = None,
                   rebuild: bool = False) -> list:
     """Этап discovery целиком. Возвращает CategoryResult по каждой категории."""
     categories = [settings.category(name) for name in names] if names else list(
@@ -640,7 +640,7 @@ def run_discovery(wh: Warehouse, settings: Settings, names: Optional[list] = Non
     return ordered
 
 
-def export_panel(wh: Warehouse, settings: Settings) -> Optional[int]:
+def export_panel(wh: Warehouse, settings: Settings) -> int | None:
     """Выгружает активную panel в CSV, если это задано в настройках."""
     path = settings.discovery.export_csv
     if path is None:

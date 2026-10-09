@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from typing import Optional
 
 STORAGE_CHOICES = ("csv", "postgres", "clickhouse")
 
@@ -24,7 +23,7 @@ def add_storage_arguments(parser: argparse.ArgumentParser,
     parser.add_argument("--date", help=DATE_HELP)
 
 
-def parse_date(value: Optional[str]) -> Optional[dt.date]:
+def parse_date(value: str | None) -> dt.date | None:
     """Разбирает значение --date.
 
     :raises ValueError: с текстом, готовым к выводу пользователю.

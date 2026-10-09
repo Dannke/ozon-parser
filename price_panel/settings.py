@@ -18,7 +18,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from . import config, constants
 
@@ -85,12 +85,12 @@ class DiscoverySettings:
     block_backoff: tuple = (10.0, 60.0, 180.0, 300.0)
     # Пауза между категориями, секунды.
     category_pause: float = 60.0
-    export_csv: Optional[Path] = None
+    export_csv: Path | None = None
 
 
 @dataclass(frozen=True)
 class ParserSettings:
-    csv_export: Optional[Path] = None
+    csv_export: Path | None = None
     min_success_rate: float = 0.0
     # Откуда брать цену: api - внутренний API, как старый сценарий; html -
     # JSON, встроенный в HTML карточки (API остаётся запасным путём).
@@ -135,7 +135,7 @@ class Settings:
     schedule: ScheduleSettings = field(default_factory=ScheduleSettings)
     benchmark: BenchmarkSettings = field(default_factory=BenchmarkSettings)
     backup: BackupSettings = field(default_factory=BackupSettings)
-    path: Optional[Path] = None
+    path: Path | None = None
 
     def category(self, name: str) -> CategoryConfig:
         for category in self.discovery.categories:
@@ -166,17 +166,17 @@ def _number(section: dict, key: str, default, kind, minimum, maximum, where: str
     return value
 
 
-def _float(section: dict, key: str, default: float, minimum: Optional[float] = None,
-           maximum: Optional[float] = None, where: str = "") -> float:
+def _float(section: dict, key: str, default: float, minimum: float | None = None,
+           maximum: float | None = None, where: str = "") -> float:
     return float(_number(section, key, default, float, minimum, maximum, where))
 
 
-def _int(section: dict, key: str, default: int, minimum: Optional[int] = None,
-         maximum: Optional[int] = None, where: str = "") -> int:
+def _int(section: dict, key: str, default: int, minimum: int | None = None,
+         maximum: int | None = None, where: str = "") -> int:
     return int(_number(section, key, default, int, minimum, maximum, where))
 
 
-def _path(value: Any) -> Optional[Path]:
+def _path(value: Any) -> Path | None:
     if not value:
         return None
     path = Path(str(value))
@@ -241,7 +241,7 @@ def _category(raw: Any, defaults: dict) -> CategoryConfig:
     )
 
 
-def parse_settings(data: Any, path: Optional[Path] = None) -> Settings:
+def parse_settings(data: Any, path: Path | None = None) -> Settings:
     """Проверяет и собирает настройки из разобранного YAML."""
     if not isinstance(data, dict):
         raise SettingsError("config.yaml: ожидается словарь верхнего уровня")
@@ -330,7 +330,7 @@ def parse_settings(data: Any, path: Optional[Path] = None) -> Settings:
     )
 
 
-def load_settings(path: Optional[Path] = None) -> Settings:
+def load_settings(path: Path | None = None) -> Settings:
     """Читает config.yaml (или PIPELINE_CONFIG)."""
     import yaml  # локальный импорт: parse_ozon.py без конвейера YAML не нужен
 

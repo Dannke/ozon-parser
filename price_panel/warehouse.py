@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from . import config, db
 from .logger import get_logger
@@ -279,9 +279,9 @@ class Warehouse:
             return {row[0] for row in cursor.fetchall()}
         return self.run(query)
 
-    def panel_skus(self, categories: Optional[Iterable[str]] = None,
-                   limit: Optional[int] = None,
-                   missing_since: Optional[dt.datetime] = None) -> list:
+    def panel_skus(self, categories: Iterable[str] | None = None,
+                   limit: int | None = None,
+                   missing_since: dt.datetime | None = None) -> list:
         """Активные SKU panel для парсинга: дольше всех не обновлявшиеся - первыми.
 
         Сначала SKU, которые ещё ни разу не пытались разобрать, затем - по
@@ -316,7 +316,7 @@ class Warehouse:
         return self.run(query)
 
     def add_to_panel(self, picks: Iterable[PanelPick], category: str, source: str,
-                     discovery_run_id: Optional[int]) -> int:
+                     discovery_run_id: int | None) -> int:
         """Добавляет отобранные SKU. Возвращает число новых или возвращённых в panel.
 
         Активные строки не трогаются (WHERE NOT is_active в upsert): повторный
@@ -384,7 +384,7 @@ class Warehouse:
 
     def finish_discovery_run(self, run_id: int, status: str, pages_requested: int = 0,
                              discovered: int = 0, selected_top: int = 0,
-                             selected_tail: int = 0, error_message: Optional[str] = None) -> None:
+                             selected_tail: int = 0, error_message: str | None = None) -> None:
         def update(cursor) -> None:
             cursor.execute(
                 "UPDATE discovery_runs SET finished_at = now(), status = %s, "
@@ -429,8 +429,8 @@ class Warehouse:
 
     def finish_parse_run(self, run_id: int, status: str, processed: int, success: int,
                          errors: int, duration_seconds: float,
-                         sku_per_minute: Optional[float],
-                         avg_sku_seconds: Optional[float]) -> None:
+                         sku_per_minute: float | None,
+                         avg_sku_seconds: float | None) -> None:
         def update(cursor) -> None:
             cursor.execute(
                 "UPDATE parse_runs SET status = %s, finished_at = now(), "
@@ -442,10 +442,10 @@ class Warehouse:
         self.run(update)
 
     def record_product(self, run_id: int, product: dict,
-                       collected_at: Optional[dt.datetime] = None) -> None:
+                       collected_at: dt.datetime | None = None) -> None:
         """Сохраняет карточку и наблюдение цены - одной транзакцией."""
         params = product_params(run_id, product,
-                                collected_at or dt.datetime.now(dt.timezone.utc))
+                                collected_at or dt.datetime.now(dt.UTC))
 
         def write(cursor) -> None:
             cursor.execute(PRODUCT_UPSERT, params)
@@ -468,7 +468,7 @@ class Warehouse:
         return self.run(query)
 
     def record_error(self, run_id: int, sku: str, error_type: str, message: str,
-                     attempts: Optional[int] = None) -> None:
+                     attempts: int | None = None) -> None:
         def insert(cursor) -> None:
             cursor.execute(
                 "INSERT INTO parse_errors (run_id, sku, error_type, error_message, attempts) "

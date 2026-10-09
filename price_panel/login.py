@@ -35,7 +35,6 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
@@ -462,7 +461,7 @@ def login_manual(page: Page, context) -> None:
 
 
 # --------------------------------------------------------------------- main --
-def check_settings(method: str) -> Optional[str]:
+def check_settings(method: str) -> str | None:
     """Текст ошибки, если для выбранного способа входа не хватает настроек."""
     if method not in LOGIN_METHODS:
         return "Неизвестный способ входа LOGIN_METHOD={!r}, допустимо: {}".format(
@@ -476,7 +475,7 @@ def check_settings(method: str) -> Optional[str]:
 
 
 def run(manual: bool = False, force: bool = False, method: str = "",
-        max_age_days: Optional[float] = None, interactive: bool = True) -> int:
+        max_age_days: float | None = None, interactive: bool = True) -> int:
     """Точка входа. Возвращает код возврата процесса.
 
     :param force: войти заново, даже если сессия действительна.
@@ -498,7 +497,7 @@ def run(manual: bool = False, force: bool = False, method: str = "",
         log.error("Ручной вход невозможен в фоновом запуске")
         return 1
 
-    gmail: Optional[GmailCodeReader] = None
+    gmail: GmailCodeReader | None = None
     if not manual:
         problem = check_settings(method)
         if problem:

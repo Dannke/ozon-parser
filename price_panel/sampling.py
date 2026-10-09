@@ -22,7 +22,6 @@ import re
 import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Optional
 
 GROUP_TOP = "top"
 GROUP_TAIL = "tail_random"
@@ -54,7 +53,7 @@ class PanelPick:
     group: str
 
 
-def sku_from_url(url: str) -> Optional[str]:
+def sku_from_url(url: str) -> str | None:
     """SKU из ссылки на карточку Ozon или None, если это не карточка товара.
 
     Принимает абсолютные и относительные ссылки, с параметрами и без

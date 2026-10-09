@@ -47,7 +47,7 @@ config.yaml ─> discover ─> sku_panel ─> parse (ежедневно) ─> pr
 Рабочая схема: **PostgreSQL — в Docker, парсинг — на хосте в Google Chrome**
 (в контейнере Ozon блокирует браузер на карточках товаров).
 
-Нужны Python 3.9+, Docker Desktop и Google Chrome. Вход в аккаунт Ozon для
+Нужны Python 3.11+, Docker Desktop и Google Chrome. Вход в аккаунт Ozon для
 сбора не нужен: вход через Gmail (`get_cookies.py`) оставлен на будущее.
 Подробная инструкция — [docs/installation.md](docs/installation.md).
 

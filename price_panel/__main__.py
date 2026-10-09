@@ -114,7 +114,7 @@ def cmd_panel(args, settings: Settings) -> int:
 
 def _today_start(settings: Settings) -> dt.datetime:
     tz = scheduler.get_timezone(settings.schedule.timezone)
-    return scheduler.day_start(dt.datetime.now(dt.timezone.utc), tz)
+    return scheduler.day_start(dt.datetime.now(dt.UTC), tz)
 
 
 def _skus_for_parse(args, wh: Warehouse, settings: Settings) -> tuple:

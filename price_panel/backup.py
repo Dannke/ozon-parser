@@ -24,8 +24,8 @@ import contextlib
 import datetime as dt
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from . import config
 from .logger import get_logger
@@ -66,7 +66,7 @@ def _stderr(result: subprocess.CompletedProcess) -> str:
     return " ".join(text.split())[-300:]
 
 
-def create_backup(directory: Path, keep: int, today: Optional[dt.date] = None,
+def create_backup(directory: Path, keep: int, today: dt.date | None = None,
                   runner: Callable = subprocess.run) -> Path:
     """Снимает копию базы в directory/ozon-ГГГГ-ММ-ДД.dump и удаляет лишние старые.
 

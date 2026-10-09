@@ -34,8 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
-from typing import Callable, Optional
+from collections.abc import Callable, Sequence
 
 from . import config
 from .logger import get_logger
@@ -282,7 +281,7 @@ def ping(ok: bool, opener: Callable = urllib.request.urlopen) -> bool:
     return _request(request, opener) == SENT
 
 
-def job_problems(parse_code: int, backup_ok: Optional[bool]) -> list:
+def job_problems(parse_code: int, backup_ok: bool | None) -> list:
     """Что пошло не так в ежедневном прогоне; пустой список - всё в порядке.
 
     :param backup_ok: None - копия не снималась (выключена в config.yaml).
@@ -314,7 +313,7 @@ def report_retry(retry_at: str, attempt: int, attempts: int, details: Details = 
         opener=opener)
 
 
-def report_job(parse_code: int, backup_ok: Optional[bool], summary: Details = _no_details,
+def report_job(parse_code: int, backup_ok: bool | None, summary: Details = _no_details,
                opener: Callable = urllib.request.urlopen, sleep: Callable = time.sleep) -> None:
     """Итог ежедневного прогона: пульс и сообщение в Telegram.
 
@@ -346,7 +345,7 @@ def report_failure(problem: str, opener: Callable = urllib.request.urlopen,
           footer="Подробности: logs/pipeline.log", opener=opener, final=True, sleep=sleep)
 
 
-def find_chats(opener: Callable = urllib.request.urlopen) -> Optional[list]:
+def find_chats(opener: Callable = urllib.request.urlopen) -> list | None:
     """Чаты, которые недавно писали боту: [(chat_id, название)].
 
     Нужен, чтобы узнать TELEGRAM_CHAT_ID: Telegram отдаёт обновления бота за

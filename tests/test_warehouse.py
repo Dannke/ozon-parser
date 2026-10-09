@@ -50,7 +50,7 @@ def test_history_key_matches_schema():
 
 def test_html_source_does_not_claim_missing_rich_content():
     """В HTML нет описания: False оттуда - «не знаем», а не «нет rich-контента»."""
-    at = dt.datetime(2026, 9, 29, tzinfo=dt.timezone.utc)
+    at = dt.datetime(2026, 9, 29, tzinfo=dt.UTC)
     api = warehouse.product_params(7, PRODUCT, at)
     html = warehouse.product_params(7, dict(PRODUCT, source="html", has_rich_content=False,
                                             details=False), at)
@@ -65,7 +65,7 @@ def test_slow_attributes_wait_for_the_description():
     None не затирает известное в products (COALESCE), а цена из той же записи
     в историю попадает как обычно.
     """
-    at = dt.datetime(2026, 10, 6, tzinfo=dt.timezone.utc)
+    at = dt.datetime(2026, 10, 6, tzinfo=dt.UTC)
     without = warehouse.product_params(7, dict(PRODUCT, source="html", details=False), at)
     assert [without[name] for name in warehouse.DETAIL_FIELDS] == [None] * 4
     assert (without["price"], without["title"]) == (1463.0, "Раскраска по номерам")
@@ -116,12 +116,12 @@ def test_panel_skus_filters_and_limits(wh):
 
 def test_history_grows_between_runs_but_not_within_one(wh):
     first = wh.start_parse_run("manual", "panel", 1, 3.0)
-    day1 = dt.datetime(2026, 9, 28, 3, 0, tzinfo=dt.timezone.utc)
+    day1 = dt.datetime(2026, 9, 28, 3, 0, tzinfo=dt.UTC)
     wh.record_product(first, PRODUCT, day1)
     wh.record_product(first, dict(PRODUCT, price=1500.0), day1)   # повтор в том же прогоне
 
     second = wh.start_parse_run("daily", "panel", 1, 3.0)
-    day2 = dt.datetime(2026, 9, 29, 3, 0, tzinfo=dt.timezone.utc)
+    day2 = dt.datetime(2026, 9, 29, 3, 0, tzinfo=dt.UTC)
     # Запасной путь (HTML): пустые характеристики не затирают известные.
     wh.record_product(second, dict(PRODUCT, price=1400.0, source="html", color=None,
                                    has_rich_content=False, details=False), day2)
@@ -193,7 +193,7 @@ def test_parse_lock_is_exclusive_and_stale_runs_are_closed(wh):
 def test_stale_run_totals_are_recovered_from_per_sku_rows(wh):
     """Прогон, убитый вместе с компьютером, не остаётся с нулями в итогах."""
     run_id = wh.start_parse_run("daily", "panel", 1200, 3.0)
-    late = dt.datetime(2026, 9, 30, 20, 19, tzinfo=dt.timezone.utc)
+    late = dt.datetime(2026, 9, 30, 20, 19, tzinfo=dt.UTC)
     wh.record_product(run_id, PRODUCT, late - dt.timedelta(hours=1))
     wh.record_error(run_id, "111", "fetch_error", "403", 3)
     wh.record_error(run_id, "222", "fetch_error", "403", 3)
@@ -211,7 +211,7 @@ def test_parse_queue_starts_with_least_recently_attempted(wh):
     """Обрывающиеся прогоны не должны обходить одни и те же SKU каждый день."""
     wh.add_to_panel(picks("a", "b", "c", "d", "e"), "phones", "ozon_listing", None)
     run_id = wh.start_parse_run("daily", "panel", 5, 3.0)
-    day1 = dt.datetime(2026, 10, 1, 15, 0, tzinfo=dt.timezone.utc)
+    day1 = dt.datetime(2026, 10, 1, 15, 0, tzinfo=dt.UTC)
     wh.record_product(run_id, dict(PRODUCT, sku="a"), day1)                           # успех вчера
     wh.record_product(run_id, dict(PRODUCT, sku="b"), day1 - dt.timedelta(days=1))    # позавчера
     wh.record_error(run_id, "c", "antibot", "антибот-проверка не прошла", 1)       # попытка сейчас
@@ -229,11 +229,11 @@ def test_parse_queue_can_skip_skus_collected_since(wh):
     """Повтор после блокировки добирает только то, чего за день ещё нет."""
     wh.add_to_panel(picks("a", "b", "c"), "phones", "ozon_listing", None)
     run_id = wh.start_parse_run("daily", "panel", 3, 3.0)
-    today = dt.datetime(2026, 10, 5, 6, 0, tzinfo=dt.timezone.utc)
+    today = dt.datetime(2026, 10, 5, 6, 0, tzinfo=dt.UTC)
     wh.record_product(run_id, dict(PRODUCT, sku="a"), today)                          # сегодня
     wh.record_product(run_id, dict(PRODUCT, sku="b"), today - dt.timedelta(days=1))   # вчера
     wh.record_error(run_id, "c", "antibot", "антибот-проверка не прошла", 1)       # ошибка
-    midnight = dt.datetime(2026, 10, 4, 21, 0, tzinfo=dt.timezone.utc)                # 00:00 МСК
+    midnight = dt.datetime(2026, 10, 4, 21, 0, tzinfo=dt.UTC)                # 00:00 МСК
     assert set(wh.panel_skus(missing_since=midnight)) == {"b", "c"}
     assert set(wh.panel_skus(["phones"], missing_since=midnight)) == {"b", "c"}
     assert len(wh.panel_skus()) == 3

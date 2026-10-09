@@ -17,7 +17,7 @@ import datetime as dt
 
 from price_panel.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 
 
 def observation(sku: str, price: float, old_price=None, available: bool = True,

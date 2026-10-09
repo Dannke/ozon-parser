@@ -94,7 +94,7 @@ def test_db_rows_values_in_order():
     row = storage._db_rows([SAMPLE], date)[0]
 
     assert len(row) == len(storage.DB_FIELDS)
-    values = dict(zip(storage.DB_FIELDS, row))
+    values = dict(zip(storage.DB_FIELDS, row, strict=True))
     assert values["sku"] == "2359066702"
     assert values["parsed_date"] == date
     assert values["price"] == 1759.0
@@ -157,8 +157,8 @@ def test_source_column_lives_in_db_only():
     assert "source" in storage.DB_FIELDS
     assert "source" not in FIELDS
 
-    row = dict(zip(storage.DB_FIELDS,
-                   storage._db_rows([dict(SAMPLE, source="html")], dt.date(2026, 9, 23))[0]))
+    values = storage._db_rows([dict(SAMPLE, source="html")], dt.date(2026, 9, 23))[0]
+    row = dict(zip(storage.DB_FIELDS, values, strict=True))
     assert row["source"] == "html"
 
     with tempfile.TemporaryDirectory() as tmp:

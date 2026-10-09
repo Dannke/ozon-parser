@@ -18,7 +18,6 @@ import argparse
 import csv
 import datetime as dt
 import sys
-from typing import Optional
 
 from . import cli, config, db
 from .logger import get_logger
@@ -86,7 +85,7 @@ def count_clickhouse(snapshot_date: dt.date) -> int:
         raise CheckError(str(exc)) from exc
 
 
-def run(snapshot_date: Optional[dt.date] = None, backend: str = "",
+def run(snapshot_date: dt.date | None = None, backend: str = "",
         min_rows: int = 1) -> int:
     """Проверяет наличие данных. Возвращает код возврата процесса."""
     snapshot_date = snapshot_date or dt.date.today()

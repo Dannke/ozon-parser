@@ -12,7 +12,6 @@ import json
 import logging
 import urllib.error
 import urllib.parse
-from typing import Optional
 
 import pytest
 
@@ -34,7 +33,7 @@ class Response:
 class Recorder:
     """urlopen, который ничего не отправляет: запоминает запросы."""
 
-    def __init__(self, fail_with: Optional[Exception] = None):
+    def __init__(self, fail_with: Exception | None = None):
         self.requests: list = []
         self.fail_with = fail_with
 
@@ -247,7 +246,7 @@ class Flaky(Recorder):
     """urlopen, где первые fail_times отправок в Telegram падают с ошибкой сети;
     пульс healthcheck проходит."""
 
-    def __init__(self, fail_times: int, error: Optional[Exception] = None):
+    def __init__(self, fail_times: int, error: Exception | None = None):
         super().__init__()
         self.fail_times = fail_times
         self.error = error or urllib.error.URLError(TimeoutError("timed out"))

@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Optional
 
 from . import constants, secrets_fs
 from .logger import get_logger
@@ -50,7 +49,7 @@ def age_days(path: Path) -> float:
     return (time.time() - path.stat().st_mtime) / 86400
 
 
-def refresh_reason(path: Path, max_age_days: Optional[float] = None) -> Optional[str]:
+def refresh_reason(path: Path, max_age_days: float | None = None) -> str | None:
     """Почему сессию нужно перевыпустить, или None, если она годится.
 
     :param max_age_days: считать сессию протухшей, если файл старше; None -
@@ -75,7 +74,7 @@ def is_logged_in(path: Path) -> bool:
     return refresh_reason(path) is None
 
 
-def load_session(path: Path) -> Optional[dict]:
+def load_session(path: Path) -> dict | None:
     """Читает состояние сессии для ``browser.new_context(storage_state=...)``.
 
     Вход для карточек ozon.ru не нужен: без файла (None) или без токенов в нём

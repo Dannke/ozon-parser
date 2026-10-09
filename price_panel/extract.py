@@ -24,7 +24,7 @@ import json
 import re
 from collections.abc import Iterator
 from html.parser import HTMLParser
-from typing import Any, Optional
+from typing import Any
 
 from . import constants
 
@@ -94,7 +94,7 @@ STATE_ID_PREFIX = "state-"
 
 
 # ---------------------------------------------------------------- примитивы --
-def to_number(value: Any) -> Optional[float]:
+def to_number(value: Any) -> float | None:
     """Превращает '5 990 ₽', '4,8', 1234 в число. Возвращает None, если не вышло."""
     if value is None or isinstance(value, bool):
         return None
@@ -117,7 +117,7 @@ def to_number(value: Any) -> Optional[float]:
         return None
 
 
-def to_int(value: Any) -> Optional[int]:
+def to_int(value: Any) -> int | None:
     """Целое число из строки вида '1 234 отзыва'."""
     number = to_number(value)
     return int(number) if number is not None else None
@@ -189,7 +189,7 @@ class _EmbeddedJsonCollector(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.states: dict = {}
         self.json_ld: list = []
-        self._ld_chunks: Optional[list] = None
+        self._ld_chunks: list | None = None
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         attributes = dict(attrs)
@@ -217,7 +217,7 @@ def _collect_embedded(html: str) -> _EmbeddedJsonCollector:
     return collector
 
 
-def _find_ld_product(node: Any) -> Optional[dict]:
+def _find_ld_product(node: Any) -> dict | None:
     """Объект schema.org Product внутри JSON-LD (бывает списком или в @graph)."""
     if isinstance(node, list):
         for item in node:
@@ -252,7 +252,7 @@ def embedded_page_json(html: str) -> dict:
 
 
 # ------------------------------------------------------- отдельные поля ------
-def extract_title(page_json: dict) -> Optional[str]:
+def extract_title(page_json: dict) -> str | None:
     """Название товара: из виджета заголовка, при неудаче - из SEO-блока."""
     for state in widgets_by_name(page_json, W_HEADING):
         if isinstance(state, dict):
@@ -268,7 +268,7 @@ def extract_title(page_json: dict) -> Optional[str]:
     return None
 
 
-def extract_price(page_json: dict) -> Optional[float]:
+def extract_price(page_json: dict) -> float | None:
     """Актуальная цена.
 
     Виджеты перебираются в порядке W_PRICE, а не в порядке их появления в
@@ -311,7 +311,7 @@ def extract_offer(page_json: dict) -> dict:
         old_price = to_number(state.get("originalPrice")) or None
 
     if _exact_widgets(page_json, "webOutOfStock"):
-        is_available: Optional[bool] = False
+        is_available: bool | None = False
     elif isinstance(state.get("isAvailable"), bool):
         is_available = state["isAvailable"]
     else:
@@ -325,7 +325,7 @@ def extract_offer(page_json: dict) -> dict:
     return {"card_price": card_price, "old_price": old_price, "is_available": is_available}
 
 
-def discount_pct(price: Optional[float], old_price: Optional[float]) -> Optional[float]:
+def discount_pct(price: float | None, old_price: float | None) -> float | None:
     """Скидка price относительно зачёркнутой цены, % (None - зачёркнутой нет)."""
     if not price or not old_price:
         return None
@@ -336,8 +336,8 @@ def discount_pct(price: Optional[float], old_price: Optional[float]) -> Optional
 
 def extract_score(page_json: dict) -> tuple:
     """Кортеж (рейтинг, количество отзывов)."""
-    rating: Optional[float] = None
-    reviews: Optional[int] = None
+    rating: float | None = None
+    reviews: int | None = None
 
     for state in widgets_by_name(page_json, W_SCORE):
         if not isinstance(state, dict):
@@ -361,7 +361,7 @@ def extract_score(page_json: dict) -> tuple:
     return rating, reviews
 
 
-def _media_url(item: Any, *keys: str) -> Optional[str]:
+def _media_url(item: Any, *keys: str) -> str | None:
     """Ссылка на файл из элемента галереи: формат поля менялся не раз."""
     if isinstance(item, str):
         return item
@@ -374,7 +374,7 @@ def _media_url(item: Any, *keys: str) -> Optional[str]:
 
 def extract_media(page_json: dict) -> tuple:
     """Кортеж (обложка, количество фото, количество видео)."""
-    cover: Optional[str] = None
+    cover: str | None = None
     images: list = []
     videos: list = []
 
@@ -438,7 +438,7 @@ def collect_characteristics(page_json: dict) -> dict:
     return result
 
 
-def find_characteristic(characteristics: dict, keywords, exclude=()) -> Optional[str]:
+def find_characteristic(characteristics: dict, keywords, exclude=()) -> str | None:
     """Значение характеристики по ключевым словам.
 
     Название сравнивается по убыванию точности: целиком, по началу, по
@@ -455,7 +455,7 @@ def find_characteristic(characteristics: dict, keywords, exclude=()) -> Optional
     return None
 
 
-def extract_color(page_json: dict, characteristics: dict) -> Optional[str]:
+def extract_color(page_json: dict, characteristics: dict) -> str | None:
     """Цвет: из характеристик, иначе из активного варианта в блоке аспектов."""
     color = find_characteristic(characteristics, COLOR_KEYS, exclude=COLOR_EXCLUDE)
     if color:
@@ -499,7 +499,7 @@ def extract_has_rich_content(page_json: dict) -> bool:
 
 
 # -------------------------------------------------------------- сборка ------
-def parse_product(page_json: dict, sku: str, extra_states: Optional[dict] = None) -> dict:
+def parse_product(page_json: dict, sku: str, extra_states: dict | None = None) -> dict:
     """Собирает запись о товаре из ответа API (или совместимого с ним JSON).
 
     :param extra_states: состояния виджетов второй части карточки - описание
@@ -542,7 +542,7 @@ def parse_product(page_json: dict, sku: str, extra_states: Optional[dict] = None
     }
 
 
-def parse_html(html: str, sku: str, extra_states: Optional[dict] = None) -> dict:
+def parse_html(html: str, sku: str, extra_states: dict | None = None) -> dict:
     """Собирает запись о товаре из JSON, встроенного в HTML карточки.
 
     Состояния виджетов разбираются тем же кодом, что и ответ API. Чего в них
@@ -555,7 +555,7 @@ def parse_html(html: str, sku: str, extra_states: Optional[dict] = None) -> dict
 
 
 def product_from_embedded(embedded: dict, sku: str,
-                          extra_states: Optional[dict] = None) -> dict:
+                          extra_states: dict | None = None) -> dict:
     """parse_html по уже разобранному HTML (результат embedded_page_json).
 
     Разбор HTML - самая дорогая часть, поэтому, если к карточке позже

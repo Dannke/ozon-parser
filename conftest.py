@@ -71,7 +71,7 @@ def select(wh):
         def query(cursor) -> list:
             cursor.execute(sql)
             names = [column[0] for column in cursor.description]
-            return [dict(zip(names, row)) for row in cursor.fetchall()]
+            return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
         return wh.run(query)
     return run
 
@@ -79,7 +79,7 @@ def select(wh):
 def _golden_value(value):
     # Время - в UTC: иначе эталон зависел бы от часового пояса сессии базы.
     if isinstance(value, dt.datetime):
-        return value.astimezone(dt.timezone.utc).isoformat()
+        return value.astimezone(dt.UTC).isoformat()
     if isinstance(value, (dt.date, decimal.Decimal)):
         return str(value)
     raise TypeError("{!r} не сериализуется в эталон".format(value))

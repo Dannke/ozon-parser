@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -21,7 +20,7 @@ LISTING = (b";\n; Archive created at 2026-10-06 12:00:00 UTC\n"
 
 
 def fake_docker(dump: bytes = b"PGDMP\x01\x0e\x00 data", dump_code: int = 0,
-                listing: bytes = LISTING, calls: Optional[list] = None):
+                listing: bytes = LISTING, calls: list | None = None):
     """subprocess.run для docker compose exec: pg_dump и pg_restore --list."""
     def run(command, **kwargs):
         if calls is not None:

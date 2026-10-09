@@ -44,7 +44,6 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
@@ -111,14 +110,14 @@ class ParseOptions:
     # характеристики (art_set, has_rich_content). None - всем, как в старом
     # сценарии. Конвейер спрашивает её по расписанию (pipeline.details_schedule):
     # это лишний запрос к Ozon на каждый товар, а меняется она редко.
-    details_for: Optional[frozenset] = None
+    details_for: frozenset | None = None
 
     def wants_details(self, sku: str) -> bool:
         return self.details_for is None or sku in self.details_for
 
 
 # Когда открывалась последняя страница Ozon (time.monotonic) - для PAGE_INTERVAL.
-_last_page_open: Optional[float] = None
+_last_page_open: float | None = None
 
 
 def wait_page_slot() -> None:
@@ -249,7 +248,7 @@ def settle_page(page: Page, sku: str) -> None:
     page.wait_for_timeout(config.PAGE_SETTLE_MS)
 
 
-def fetch_details(page: Page, sku: str) -> Optional[dict]:
+def fetch_details(page: Page, sku: str) -> dict | None:
     """Состояния виджетов второй части карточки: описание и полные характеристики.
 
     None - не получены: карточка разберётся и без них, но art_set и
@@ -269,7 +268,7 @@ def html_is_enough(product: dict) -> bool:
         bool(product.get("price")) or product.get("is_available") is False)
 
 
-def parse_sku(page: Page, sku: str, options: Optional[ParseOptions] = None) -> dict:
+def parse_sku(page: Page, sku: str, options: ParseOptions | None = None) -> dict:
     """Собирает данные по одному SKU (порядок источников - см. шапку модуля)."""
     options = options or ParseOptions()
     details = options.wants_details(sku)
@@ -315,7 +314,7 @@ class SkuOutcome:
     """Итог обработки одного SKU: запись о товаре либо причина неудачи."""
 
     sku: str
-    product: Optional[dict] = None
+    product: dict | None = None
     error_type: str = ""
     error_message: str = ""
     attempts: int = 0
@@ -337,7 +336,7 @@ def error_type_of(exc: BaseException) -> str:
 
 
 def parse_sku_outcome(page: Page, sku: str, retries: int,
-                      options: Optional[ParseOptions] = None) -> SkuOutcome:
+                      options: ParseOptions | None = None) -> SkuOutcome:
     """Разбирает SKU с повторами при временных ошибках и сообщает, чем кончилось.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
@@ -386,7 +385,7 @@ def parse_sku_outcome(page: Page, sku: str, retries: int,
     return outcome
 
 
-def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]:
+def parse_sku_with_retries(page: Page, sku: str, retries: int) -> dict | None:
     """Оборачивает parse_sku повторными попытками при временных ошибках.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
@@ -468,8 +467,8 @@ class RunProgress:
             log.exception("SKU %s: не удалось записать результат", outcome.sku)
 
 
-def save_results(rows: list, backend: str, output: Optional[Path],
-                 snapshot_date: Optional[dt.date]) -> bool:
+def save_results(rows: list, backend: str, output: Path | None,
+                 snapshot_date: dt.date | None) -> bool:
     """Сохраняет собранное. Возвращает False, если сохранить не удалось."""
     try:
         storage.save(rows, backend=backend, csv_path=output, snapshot_date=snapshot_date)
@@ -479,7 +478,7 @@ def save_results(rows: list, backend: str, output: Optional[Path],
         return False
 
 
-def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
+def parse_in_browser(progress: RunProgress, state: dict | None, total: int,
                      flush_batch) -> None:
     """Обходит оставшиеся SKU в одном экземпляре браузера.
 
@@ -525,10 +524,10 @@ def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
             browser_utils.close_quietly(context, browser)
 
 
-def run(skus, storage_backend: str = "", output: Optional[Path] = None,
-        snapshot_date: Optional[dt.date] = None, batch_size: Optional[int] = None,
-        min_success_rate: float = 0.0, observer: Optional[RunObserver] = None,
-        options: Optional[ParseOptions] = None) -> int:
+def run(skus, storage_backend: str = "", output: Path | None = None,
+        snapshot_date: dt.date | None = None, batch_size: int | None = None,
+        min_success_rate: float = 0.0, observer: RunObserver | None = None,
+        options: ParseOptions | None = None) -> int:
     """Парсит список SKU и сохраняет результат. Возвращает код возврата процесса.
 
     :param snapshot_date: дата среза для таблиц БД (по умолчанию сегодня).
@@ -639,7 +638,7 @@ def read_skus_file(path: Path) -> list:
     ))
 
 
-def select_range(skus: list, offset: int = 0, limit: Optional[int] = None) -> list:
+def select_range(skus: list, offset: int = 0, limit: int | None = None) -> list:
     """Часть списка SKU: с какого начать и сколько взять.
 
     Позволяет разложить длинный список на несколько задач планировщика: при

@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as dt
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -65,7 +64,7 @@ class FakeWarehouse(Warehouse):
         return set(self.without_details)
 
 
-def scripted_browser(results: dict, seen_options: Optional[list] = None):
+def scripted_browser(results: dict, seen_options: list | None = None):
     """parse_in_browser, который отдаёт заранее заданные итоги SKU."""
     def run_session(progress, state, total, flush_batch):
         if seen_options is not None:
