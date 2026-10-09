@@ -12,7 +12,7 @@ from typing import cast
 from playwright.sync_api import Page
 from test_extract import FIXTURE, card_html
 
-from ozon_parser import parse
+from price_panel import parse
 
 PAGE = cast(Page, None)
 FULL_HTML = card_html({"webProductHeading-1-default-1": {"title": "Кресло из HTML"},

@@ -15,9 +15,9 @@ import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
-from ozon_parser import config, discovery
-from ozon_parser.sampling import Candidate, listing_position, make_rng
-from ozon_parser.settings import CategoryConfig
+from price_panel import config, discovery
+from price_panel.sampling import Candidate, listing_position, make_rng
+from price_panel.settings import CategoryConfig
 
 CATEGORY = CategoryConfig(name="phones", panel_size=20, top_ratio=0.4,
                           url="https://www.ozon.ru/category/smartfony-15502/",

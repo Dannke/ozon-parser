@@ -23,5 +23,5 @@ RUN pip install -r requirements.txt "psycopg2-binary==2.9.9" \
 COPY . .
 
 # По умолчанию - ежедневный планировщик; разовые команды:
-#   docker compose run --rm parser python -m ozon_parser discover
-CMD ["python", "-m", "ozon_parser", "schedule"]
+#   docker compose run --rm parser python -m price_panel discover
+CMD ["python", "-m", "price_panel", "schedule"]

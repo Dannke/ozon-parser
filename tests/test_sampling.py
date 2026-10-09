@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ozon_parser.sampling import (
+from price_panel.sampling import (
     GROUP_TAIL,
     GROUP_TOP,
     Candidate,

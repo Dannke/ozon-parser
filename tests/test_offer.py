@@ -10,7 +10,7 @@ import json
 
 from test_extract import FIXTURE, card_html
 
-from ozon_parser.extract import FIELDS, discount_pct, extract_offer, parse_html, parse_product
+from price_panel.extract import FIELDS, discount_pct, extract_offer, parse_html, parse_product
 
 
 def test_offer_fields_from_web_price():

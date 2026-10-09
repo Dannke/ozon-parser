@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from ozon_parser import check, config, storage
+from price_panel import check, config, storage
 
 SAMPLE = {
     "sku": "2359066702",

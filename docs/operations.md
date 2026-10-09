@@ -23,7 +23,7 @@
 
 Каждый день в `schedule.daily_at` из `config.yaml` (сейчас 08:45 по Москве)
 выполняются шаги отдельными процессами — это команда
-`python -m ozon_parser schedule --once`:
+`python -m price_panel schedule --once`:
 
 ```text
 Telegram: «начался ежедневный сбор» (если настроен)
@@ -68,7 +68,7 @@ SKU, которые ещё ни разу не пробовали разобра�
 powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
 ```
 
-Скрипт регистрирует задачу `OzonParserDaily`, которая запускает
+Скрипт регистрирует задачу `PricePanelDaily`, которая запускает
 `scripts/run_daily.ps1` (Chrome без окна, `HEADLESS=1`). Особенности:
 
 - **Время.** Берётся из `config.yaml` и переводится в местное время Windows:
@@ -82,8 +82,12 @@ powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
   `parse_timeout_hours` + 1 ч (11 ч): прогон завершается сам раньше, лимит —
   страховка от зависания.
 - **Проверить или удалить:**
-  `Get-ScheduledTask -TaskName OzonParserDaily | Get-ScheduledTaskInfo`,
-  `Unregister-ScheduledTask -TaskName OzonParserDaily`.
+  `Get-ScheduledTask -TaskName PricePanelDaily | Get-ScheduledTaskInfo`,
+  `Unregister-ScheduledTask -TaskName PricePanelDaily`.
+- **Переход с версии 1.x.** До переименования проекта (2.0.0) задача
+  называлась `OzonParserDaily`. После регистрации `PricePanelDaily` старую
+  нужно снять (`Unregister-ScheduledTask -TaskName OzonParserDaily`), иначе
+  прогонов будет два и второй упрётся в блокировку первого.
 
 Условия для прогона: компьютер включён и не уходит в сон всё время прогона
 (Параметры → Система → Питание), вы вошли в систему, Docker Desktop запущен
@@ -91,7 +95,7 @@ powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
 
 ### Контейнерный планировщик
 
-`python -m ozon_parser schedule` — простой цикл, который ждёт `daily_at` и
+`python -m price_panel schedule` — простой цикл, который ждёт `daily_at` и
 выполняет те же шаги. В docker-compose он лежит под профилем и по умолчанию
 не стартует: в контейнере Ozon блокирует браузер на карточках (см.
 [Браузер в контейнере](#браузер-в-контейнере)). Включить, когда это будет
@@ -106,7 +110,7 @@ docker compose --profile container-scheduler up -d
 Airflow DAG (`dags/ozon_parser_dag.py`) обслуживает старый сценарий (см.
 [legacy.md](legacy.md#airflow)). Чтобы перевести его на panel, достаточно
 заменить команду задачи `parse_products` на
-`python -m ozon_parser parse --kind daily`.
+`python -m price_panel parse --kind daily`.
 
 ### Повтор после блокировки
 
@@ -135,7 +139,7 @@ Airflow DAG (`dags/ozon_parser_dag.py`) обслуживает старый сц
 Догнать вручную в тот же день:
 
 ```bash
-python -m ozon_parser parse --kind daily --missing-today
+python -m price_panel parse --kind daily --missing-today
 ```
 
 ## Резервные копии
@@ -157,7 +161,7 @@ python -m ozon_parser parse --kind daily --missing-today
 Вручную:
 
 ```bash
-python -m ozon_parser backup
+python -m price_panel backup
 ```
 
 Каталог задаётся `backup.dir`. Надёжнее держать копии на другом диске или в
@@ -180,7 +184,7 @@ docker compose exec -T postgres pg_restore -U ozon -d ozon_restored --no-owner /
 ```
 
 Проверить восстановленную базу можно, указав её в `PG_DSN` и выполнив
-`python -m ozon_parser runs`.
+`python -m price_panel runs`.
 
 ## Оповещения
 
@@ -219,7 +223,7 @@ docker compose exec -T postgres pg_restore -U ozon -d ozon_restored --no-owner /
 - итог и «сбор не начался» — последние сообщения прогона, поэтому они
   повторяют попытки около получаса (через 1, 3, 10 и 15 мин). Не ушло и
   после этого — дойдёт со следующим прогоном или командой
-  `python -m ozon_parser notify`;
+  `python -m price_panel notify`;
 - в очереди не больше 20 сообщений и не старше трёх суток;
 - отказ самого Telegram (`HTTP 401`, `chat not found` и прочие 4xx, кроме 429)
   не повторяется — это ошибка настройки, причина в `logs/notify.log`.
@@ -232,7 +236,7 @@ Windows AmneziaVPN не подключился, и `api.telegram.org` не от�
 Чего Telegram не расскажет: компьютер был выключен или спал в 12:45, процесс
 убит Планировщиком по пределу времени, Windows-задача не запустилась. Изнутри
 такого прогона писать некому — это ловит только пульс: если его нет дольше
-расписания, сервис мониторинга предупредит сам. Задача `OzonParserDaily`
+расписания, сервис мониторинга предупредит сам. Задача `PricePanelDaily`
 запускается, только когда пользователь вошёл в Windows: после ночной
 перезагрузки без входа прогона не будет.
 
@@ -246,7 +250,7 @@ Windows AmneziaVPN не подключился, и `api.telegram.org` не от�
 3. Узнайте id чата:
 
    ```bash
-   python -m ozon_parser notify
+   python -m price_panel notify
    ```
 
    Пока `TELEGRAM_CHAT_ID` пуст, команда выводит чаты, которые писали боту.
@@ -270,7 +274,7 @@ Windows AmneziaVPN не подключился, и `api.telegram.org` не от�
 ## Мониторинг
 
 ```bash
-python -m ozon_parser runs
+python -m price_panel runs
 ```
 
 Показывает последние прогоны (время — в часовом поясе расписания) и объём
@@ -292,8 +296,8 @@ python -m ozon_parser runs
 а через 3 часа — [повтор](#повтор-после-блокировки) по недостающим.
 
 Прогон оборвался из-за выключения компьютера — догоните его вручную
-(`python -m ozon_parser parse --kind daily --missing-today`) или разовой
-задачей Windows с тем же действием, что у `OzonParserDaily`. Состав panel — `python -m ozon_parser panel`. Для
+(`python -m price_panel parse --kind daily --missing-today`) или разовой
+задачей Windows с тем же действием, что у `PricePanelDaily`. Состав panel — `python -m price_panel panel`. Для
 аналитики — представления из [data-model.md](data-model.md).
 
 ## Доступ для аналитики: роль только для чтения
@@ -363,7 +367,7 @@ PARSER FINISHED run_id=2 status=success success=50 errors=0 duration=346s speed=
 
 Контейнер пишет в ту же папку `logs/` (она подключена томом). Время в строках
 от контейнера — московское, от процессов на хосте — местное время Windows;
-`python -m ozon_parser runs` показывает всё в часовом поясе расписания.
+`python -m price_panel runs` показывает всё в часовом поясе расписания.
 
 ## Предохранитель
 
@@ -403,7 +407,7 @@ docker compose up -d
 discover:
 
 ```bash
-docker compose run --rm parser python -m ozon_parser discover
+docker compose run --rm parser python -m price_panel discover
 ```
 
 - `config.yaml` подключён в контейнер как файл: правки действуют со следующей
@@ -446,12 +450,12 @@ User-Agent «Windows» на Linux. Возможное исправление: н
 | Прогон в статусе `blocked` | Ozon перестал отдавать карточки. Не перезапускайте сразу: через 3 часа задача сама повторит прогон по недостающим SKU, а что не успеет — возьмёт первым следующий прогон. Что показал Ozon — на снимках `logs/challenge-*.png` и в `logs/browser.log`. Интерактивную капчу (пазл с ползунком) парсер не решает и решать не будет |
 | `parse` в контейнере: почти всё `fetch_error`, в логе `API ответил HTTP 403` | Ozon блокирует браузер контейнера, см. [Браузер в контейнере](#браузер-в-контейнере). Парсите на хосте |
 | data.ozon.ru просит войти заново | Сессия устарела: `python get_cookies.py --force`. Нужно только для источника `data_ozon`, парсингу карточек сессия не нужна |
-| `Резервная копия не создана: не найден docker` | Не запущен Docker Desktop или `docker` нет в `PATH` задачи Windows. Копию можно снять позже: `python -m ozon_parser backup` |
+| `Резервная копия не создана: не найден docker` | Не запущен Docker Desktop или `docker` нет в `PATH` задачи Windows. Копию можно снять позже: `python -m price_panel backup` |
 | `pg_restore не читает копию` | Архив повреждён или пуст; прежние копии не тронуты. Подробности — в `logs/backup.log` |
 | Chromium на Windows: `side-by-side configuration is incorrect` | Укажите системный браузер: `BROWSER_CHANNEL=chrome` или `msedge` |
 | Вместо `cookies.json` в папке проекта появился каталог | Docker смонтировал отсутствующий файл. Удалите каталог и выполните `python get_cookies.py` |
-| Новой строки в `runs` нет | Задача не запускалась: `logs/scheduler.log`, статус задачи `OzonParserDaily` в Планировщике заданий |
-| Не приходят сообщения в Telegram | `python -m ozon_parser notify` пришлёт проверочное сообщение и заодно задержанные из очереди; причина отказа — в `logs/notify.log`. `URLError: timed out` — нет связи с `api.telegram.org`: проверьте VPN, сообщения ждут в очереди. `HTTP 401` — неверный токен, `chat not found` — неверный `TELEGRAM_CHAT_ID` или боту ни разу не писали, `bot was blocked by the user` — бот заблокирован в чате |
+| Новой строки в `runs` нет | Задача не запускалась: `logs/scheduler.log`, статус задачи `PricePanelDaily` в Планировщике заданий |
+| Не приходят сообщения в Telegram | `python -m price_panel notify` пришлёт проверочное сообщение и заодно задержанные из очереди; причина отказа — в `logs/notify.log`. `URLError: timed out` — нет связи с `api.telegram.org`: проверьте VPN, сообщения ждут в очереди. `HTTP 401` — неверный токен, `chat not found` — неверный `TELEGRAM_CHAT_ID` или боту ни разу не писали, `bot was blocked by the user` — бот заблокирован в чате |
 
 ## Секреты
 

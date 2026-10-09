@@ -14,8 +14,8 @@ import datetime as dt
 import tempfile
 from pathlib import Path
 
-from ozon_parser import storage
-from ozon_parser.extract import FIELDS
+from price_panel import storage
+from price_panel.extract import FIELDS
 
 SAMPLE = {
     "sku": "2359066702",

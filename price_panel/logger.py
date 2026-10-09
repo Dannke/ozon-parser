@@ -2,7 +2,7 @@
 
 Логи пишутся одновременно в консоль и в файл ``logs/<имя>.log``,
 чтобы после ночного прогона можно было разобрать, что именно упало.
-Каталог можно переопределить переменной окружения OZON_LOG_DIR (так делают
+Каталог можно переопределить переменной окружения PRICE_PANEL_LOG_DIR (так делают
 тесты, чтобы не засорять боевые логи).
 """
 
@@ -14,7 +14,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path(os.getenv("OZON_LOG_DIR") or Path(__file__).resolve().parent.parent / "logs")
+LOG_DIR = Path(os.getenv("PRICE_PANEL_LOG_DIR")
+               or Path(__file__).resolve().parent.parent / "logs")
 LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)-12s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 

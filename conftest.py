@@ -1,6 +1,6 @@
 """Общая настройка pytest: корень проекта в sys.path и отдельный каталог логов.
 
-Тесты лежат в tests/ и импортируют пакет ozon_parser из корня. pytest
+Тесты лежат в tests/ и импортируют пакет price_panel из корня. pytest
 добавляет в sys.path каталог этого файла, поэтому пакет находится и без
 установки - `pip install -r requirements.txt` достаточно, `pip install -e .`
 не обязателен.
@@ -27,7 +27,7 @@ if ROOT not in sys.path:
 # Логи тестов - во временный каталог, а не в боевой logs/: иначе фикстуры
 # вроде "SKU 0000000000" перемешиваются с записями настоящих прогонов.
 # Задаётся до импорта пакета: логгеры создаются при импорте модулей.
-os.environ.setdefault("OZON_LOG_DIR", tempfile.mkdtemp(prefix="ozon-parser-test-logs-"))
+os.environ.setdefault("PRICE_PANEL_LOG_DIR", tempfile.mkdtemp(prefix="price-panel-test-logs-"))
 
 # Оповещения в тестах выключены, даже если они настроены в .env: пустые
 # значения в окружении сильнее файла (load_dotenv не трогает заданные
@@ -55,7 +55,7 @@ def wh():
         pytest.skip("TEST_PG_DSN не задан")
     if "test" not in urllib.parse.urlsplit(TEST_DSN).path:
         pytest.skip("TEST_PG_DSN должен указывать на тестовую базу (имя содержит 'test')")
-    from ozon_parser.warehouse import Warehouse
+    from price_panel.warehouse import Warehouse
 
     store = Warehouse(TEST_DSN)
     store.run(lambda cursor: cursor.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))

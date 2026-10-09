@@ -1,5 +1,5 @@
 ﻿# Ежедневный прогон конвейера на Windows (для Планировщика заданий):
-#   ensure_session -> parse по активной panel  (python -m ozon_parser schedule --once)
+#   ensure_session -> parse по активной panel  (python -m price_panel schedule --once)
 #
 # Почему не в Docker: 30.09.2026 Chromium в контейнере получал от Ozon HTTP 403
 # на каждую карточку, а Google Chrome на этой машине с того же IP разбирает
@@ -15,5 +15,5 @@ Set-Location $root
 $env:HEADLESS = "1"
 $env:PYTHONUTF8 = "1"
 
-& (Join-Path $root ".venv\Scripts\python.exe") -m ozon_parser schedule --once
+& (Join-Path $root ".venv\Scripts\python.exe") -m price_panel schedule --once
 exit $LASTEXITCODE

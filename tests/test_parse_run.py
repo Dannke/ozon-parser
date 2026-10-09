@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from ozon_parser import config, parse, session, storage
+from price_panel import config, parse, session, storage
 
 
 @pytest.fixture

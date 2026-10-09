@@ -18,10 +18,10 @@ import urllib.parse
 
 from test_extract import FIXTURE, FIXTURE_MINIMAL
 
-from ozon_parser import __main__ as cli
-from ozon_parser import browser as browser_utils
-from ozon_parser import config
-from ozon_parser.sampling import GROUP_TOP, Candidate, PanelPick
+from price_panel import __main__ as cli
+from price_panel import browser as browser_utils
+from price_panel import config
+from price_panel.sampling import GROUP_TOP, Candidate, PanelPick
 
 CARDS = {"1001": FIXTURE, "1002": FIXTURE_MINIMAL}
 MISSING = "404404"

@@ -26,7 +26,7 @@ pip install -e ".[dev,postgres,clickhouse]"
 разработки.
 
 ```bash
-git worktree add ../ozon-parser-dev -b <ветка> main
+git worktree add ../price-panel-dev -b <ветка> main
 ```
 
 ## Тесты
@@ -44,7 +44,7 @@ pytest
   сайта;
 - предохранитель — на настоящем цикле парсера с подменённым браузером.
 
-Логи тестов пишутся во временный каталог (`OZON_LOG_DIR`), а не в `logs/`.
+Логи тестов пишутся во временный каталог (`PRICE_PANEL_LOG_DIR`), а не в `logs/`.
 
 Четырнадцать проверок работают с настоящим PostgreSQL: двенадцать в
 `test_warehouse.py` и оба эталона. Без `TEST_PG_DSN` они пропускаются. Имя
@@ -131,12 +131,12 @@ GitHub Actions (`.github/workflows/ci.yml`) на каждый PR и push в `mai
 
 Схема меняется только новой миграцией, уже применённые файлы не правятся:
 
-1. Создайте `ozon_parser/migrations/NNNN_описание.sql` со следующим номером.
+1. Создайте `price_panel/migrations/NNNN_описание.sql` со следующим номером.
 2. Пишите SQL, рассчитанный на однократное применение: миграции идут одной
    транзакцией по порядку номеров, учёт — в `schema_migrations`.
 3. Проверьте на тестовой базе: `TEST_PG_DSN=... pytest tests/test_warehouse.py`.
 
-Миграция применится сама при следующей команде `python -m ozon_parser`.
+Миграция применится сама при следующей команде `python -m price_panel`.
 
 ## Документация
 

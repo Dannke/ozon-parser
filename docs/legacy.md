@@ -2,7 +2,7 @@
 
 Исходный режим проекта, с которого начинался конвейер. Он работает как раньше
 и не требует ни `config.yaml`, ни таблиц конвейера. Для ежедневного
-наблюдения за panel используйте `python -m ozon_parser parse`
+наблюдения за panel используйте `python -m price_panel parse`
 (см. [operations.md](operations.md)).
 
 - [Парсинг по списку](#парсинг-по-списку)
@@ -16,7 +16,7 @@
 python parse_ozon.py 2359066702 2829800382
 ```
 
-Без аргументов берётся список `DEFAULT_SKUS` из `ozon_parser/config.py`.
+Без аргументов берётся список `DEFAULT_SKUS` из `price_panel/config.py`.
 Список можно читать из файла:
 
 ```bash
@@ -108,7 +108,7 @@ Airflow обычно нет ни Playwright, ни драйверов БД, по�
 
 | Переменная              | По умолчанию        | Назначение                                |
 | ----------------------- | ------------------- | ----------------------------------------- |
-| `ozon_project_dir`      | `/opt/ozon_parser`  | каталог проекта на сервере                |
+| `ozon_project_dir`      | `/opt/price_panel`  | каталог проекта на сервере                |
 | `ozon_python`           | `.venv/bin/python`  | интерпретатор окружения проекта           |
 | `ozon_storage`          | `postgres`          | `csv` / `postgres` / `clickhouse`         |
 | `ozon_cookies_ttl_days` | `14`                | через сколько дней входить заново         |
@@ -125,4 +125,4 @@ DAG совместим с Airflow 2.x и 3.x: операторы импорти�
 работает, нужен Linux, WSL2 или Docker.
 
 Чтобы DAG обслуживал panel конвейера, замените команду задачи
-`parse_products` на `python -m ozon_parser parse --kind daily`.
+`parse_products` на `python -m price_panel parse --kind daily`.

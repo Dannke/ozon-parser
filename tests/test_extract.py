@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 import json
 
-from ozon_parser.extract import (
+from price_panel.extract import (
     SOURCE_API,
     SOURCE_HTML,
     embedded_page_json,

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from ozon_parser import config, login, session
-from ozon_parser.gmail import GmailCodeReader, GmailError, GmailSettings
+from price_panel import config, login, session
+from price_panel.gmail import GmailCodeReader, GmailError, GmailSettings
 
 
 def write_session(path: Path, names=("__Secure-access-token",), age_days: float = 0) -> Path:

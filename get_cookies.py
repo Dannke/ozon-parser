@@ -1,6 +1,6 @@
 """Авторизация на data.ozon.ru и сохранение cookies.
 
-Точка входа: вся логика живёт в ozon_parser.login. Файл оставлен в корне намеренно -
+Точка входа: вся логика живёт в price_panel.login. Файл оставлен в корне намеренно -
 на него ссылаются README и команды Airflow DAG, и привычка запускать
 `python get_cookies.py` ничего не должна стоить.
 
@@ -13,7 +13,7 @@
 
 import sys
 
-from ozon_parser.login import main
+from price_panel.login import main
 
 if __name__ == "__main__":
     sys.exit(main())

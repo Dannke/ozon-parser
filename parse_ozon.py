@@ -1,6 +1,6 @@
 """Парсинг карточек товаров ozon.ru по списку SKU.
 
-Точка входа: вся логика живёт в ozon_parser.parse. Файл оставлен в корне намеренно -
+Точка входа: вся логика живёт в price_panel.parse. Файл оставлен в корне намеренно -
 на него ссылаются README и команды Airflow DAG, и привычка запускать
 `python parse_ozon.py` ничего не должна стоить.
 
@@ -13,7 +13,7 @@
 
 import sys
 
-from ozon_parser.parse import main
+from price_panel.parse import main
 
 if __name__ == "__main__":
     sys.exit(main())

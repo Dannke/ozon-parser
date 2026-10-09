@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from ozon_parser import db
+from price_panel import db
 
 VALID = ("ozon_products", "public.ozon_products", "_tmp", "T1", "schema_1.table_2")
 

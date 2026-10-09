@@ -1,4 +1,4 @@
-"""Командная строка конвейера: python -m ozon_parser <команда>.
+"""Командная строка конвейера: python -m price_panel <команда>.
 
     migrate     применить миграции схемы PostgreSQL
     discover    найти SKU в категориях из config.yaml и дописать sku_panel
@@ -48,7 +48,7 @@ def cmd_migrate(args, settings: Settings) -> int:
 def print_panel(wh: Warehouse) -> None:
     rows = wh.panel_summary()
     if not rows:
-        print("Panel пуста: запустите python -m ozon_parser discover")
+        print("Panel пуста: запустите python -m price_panel discover")
         return
     print("{:<22} {:<12} {:>8} {:>10}".format("category", "group", "active", "inactive"))
     totals: dict = {}
@@ -142,7 +142,7 @@ def cmd_parse(args, settings: Settings) -> int:
             print("Все SKU panel за сегодня уже собраны")
             return 0
         if not skus:
-            log.error("Нет SKU для парсинга (%s). Сначала: python -m ozon_parser discover",
+            log.error("Нет SKU для парсинга (%s). Сначала: python -m price_panel discover",
                       source)
             return 1
         report = pipeline.run_parse(wh, skus, settings, kind=args.kind, sku_source=source)
@@ -159,7 +159,7 @@ def cmd_benchmark(args, settings: Settings) -> int:
         else:
             skus, source = pipeline.sample_panel(wh, size, args.seed), "panel"
         if not skus:
-            log.error("Panel пуста - замерять не на чем. Сначала: python -m ozon_parser discover")
+            log.error("Panel пуста - замерять не на чем. Сначала: python -m price_panel discover")
             return 1
         report = pipeline.run_parse(wh, skus, settings, kind="benchmark", sku_source=source)
         print(pipeline.format_report(report, settings, title="Benchmark"))
@@ -227,7 +227,7 @@ def cmd_notify(args, settings: Settings) -> int:
     # Задержанные из-за сети сообщения уходят перед проверочным; само оно в
     # очередь не встаёт - результат виден сразу.
     queued = len(notify.load_outbox())
-    if not notify.send_telegram("✅ Ozon parser: оповещения настроены, бот на связи",
+    if not notify.send_telegram("✅ Price panel: оповещения настроены, бот на связи",
                                 queue=False):
         print("Сообщение не отправлено - причина в logs/notify.log")
         left = len(notify.load_outbox())
@@ -242,7 +242,7 @@ def cmd_notify(args, settings: Settings) -> int:
 
 # ------------------------------------------------------------------ разбор --
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ozon_parser",
+    parser = argparse.ArgumentParser(prog="python -m price_panel",
                                      description="Конвейер discovery -> panel -> parse")
     parser.add_argument("--config", type=Path, help="путь к config.yaml (или PIPELINE_CONFIG)")
     commands = parser.add_subparsers(dest="command", required=True)

@@ -6,10 +6,10 @@
 (перезапуск PostgreSQL посреди ночного прогона), операция повторяется один
 раз на новом соединении.
 
-Схема задаётся файлами ozon_parser/migrations/NNNN_*.sql. Они применяются по
+Схема задаётся файлами price_panel/migrations/NNNN_*.sql. Они применяются по
 порядку номеров, каждая ровно один раз, - учёт ведётся в schema_migrations.
 Руками ничего запускать не нужно: миграции проверяются при старте каждой
-команды python -m ozon_parser.
+команды python -m price_panel.
 """
 
 from __future__ import annotations

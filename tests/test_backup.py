@@ -13,7 +13,7 @@ from typing import Optional
 
 import pytest
 
-from ozon_parser import backup
+from price_panel import backup
 
 DAY = dt.date(2026, 10, 6)
 LISTING = (b";\n; Archive created at 2026-10-06 12:00:00 UTC\n"

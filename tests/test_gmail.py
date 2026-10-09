@@ -13,8 +13,8 @@ import base64
 import time
 from pathlib import Path
 
-from ozon_parser import gmail
-from ozon_parser.gmail import GmailCodeReader, GmailError, GmailSettings
+from price_panel import gmail
+from price_panel.gmail import GmailCodeReader, GmailError, GmailSettings
 
 extract_code = GmailCodeReader.extract_code
 collect_text = GmailCodeReader._collect_text

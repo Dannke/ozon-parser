@@ -1,15 +1,15 @@
 # Командная строка
 
-- [Конвейер: python -m ozon_parser](#конвейер-python--m-ozon_parser)
+- [Конвейер: python -m price_panel](#конвейер-python--m-price_panel)
 - [Вход на Ozon: get_cookies.py](#вход-на-ozon-get_cookiespy)
 - [Старый сценарий: parse_ozon.py и check_snapshot.py](#старый-сценарий-parse_ozonpy-и-check_snapshotpy)
 - [Скрипты Windows](#скрипты-windows)
 - [Коды возврата](#коды-возврата)
 
-## Конвейер: python -m ozon_parser
+## Конвейер: python -m price_panel
 
 ```text
-python -m ozon_parser [--config PATH] <команда> [флаги]
+python -m price_panel [--config PATH] <команда> [флаги]
 ```
 
 `--config` — путь к `config.yaml` (иначе `PIPELINE_CONFIG` или `config.yaml` в
@@ -31,19 +31,19 @@ python -m ozon_parser [--config PATH] <команда> [флаги]
 Примеры:
 
 ```bash
-python -m ozon_parser discover --category coffee_machines
+python -m price_panel discover --category coffee_machines
 ```
 
 ```bash
-python -m ozon_parser parse --category phone_cases --limit 20
+python -m price_panel parse --category phone_cases --limit 20
 ```
 
 ```bash
-python -m ozon_parser parse --kind daily --missing-today
+python -m price_panel parse --kind daily --missing-today
 ```
 
 ```bash
-python -m ozon_parser panel --export data/panel.csv
+python -m price_panel panel --export data/panel.csv
 ```
 
 Пример вывода `discover` (живой запуск 29.09.2026, пилотная panel по 20 SKU):
@@ -111,7 +111,7 @@ python check_snapshot.py [--storage csv|postgres|clickhouse] [--date YYYY-MM-DD]
 | Скрипт                                | Что делает |
 | ------------------------------------- | ---------- |
 | `scripts/run_daily.ps1`               | Ежедневный прогон (`schedule --once`) в Chrome без окна |
-| `scripts/register_windows_task.ps1`   | Регистрирует задачу `OzonParserDaily` в Планировщике заданий; `-TaskName` меняет имя |
+| `scripts/register_windows_task.ps1`   | Регистрирует задачу `PricePanelDaily` в Планировщике заданий; `-TaskName` меняет имя |
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\register_windows_task.ps1
