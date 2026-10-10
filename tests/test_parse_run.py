@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from price_panel import config, parse, session, storage
+from price_panel.infra import config
+from price_panel.legacy import storage
+from price_panel.marketplaces.ozon import parse, session
 
 
 @pytest.fixture

@@ -26,7 +26,7 @@ from collections.abc import Iterator
 from html.parser import HTMLParser
 from typing import Any
 
-from . import constants
+from price_panel.marketplaces.ozon import constants
 
 # Порядок колонок в CSV и таблицах БД.
 FIELDS = (

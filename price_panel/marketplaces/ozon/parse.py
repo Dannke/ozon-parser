@@ -49,10 +49,17 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from . import browser as browser_utils
-from . import cli, config, constants, session, storage
-from .extract import embedded_page_json, parse_html, parse_product, product_from_embedded
-from .logger import get_logger
+from price_panel.infra import browser as browser_utils
+from price_panel.infra import config
+from price_panel.infra.logger import get_logger
+from price_panel.legacy import cli, storage
+from price_panel.marketplaces.ozon import constants, session
+from price_panel.marketplaces.ozon.extract import (
+    embedded_page_json,
+    parse_html,
+    parse_product,
+    product_from_embedded,
+)
 
 log = get_logger("parse_ozon")
 

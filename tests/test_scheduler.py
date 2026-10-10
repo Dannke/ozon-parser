@@ -9,10 +9,10 @@ import sys
 
 import pytest
 
-from price_panel import scheduler
-from price_panel.db import DatabaseError
-from price_panel.pipeline import EXIT_BLOCKED
-from price_panel.settings import parse_settings
+from price_panel.app import scheduler
+from price_panel.app.settings import parse_settings
+from price_panel.core.models import EXIT_BLOCKED
+from price_panel.infra.db import DatabaseError
 
 MSK = scheduler.get_timezone("Europe/Moscow")
 BASE = {

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from price_panel.sampling import (
+from price_panel.core.sampling import (
     GROUP_TAIL,
     GROUP_TOP,
     Candidate,

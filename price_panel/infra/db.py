@@ -20,7 +20,7 @@ import contextlib
 import re
 from collections.abc import Generator
 
-from . import config
+from price_panel.infra import config
 
 # Допустимое имя таблицы: идентификатор или схема.идентификатор.
 IDENTIFIER_PART_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")

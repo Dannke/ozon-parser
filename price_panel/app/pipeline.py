@@ -22,22 +22,19 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import config, parse
-from .db import DatabaseError
-from .logger import get_logger
-from .settings import Settings
-from .warehouse import Warehouse
+from price_panel.app.settings import Settings
+from price_panel.core.models import EXIT_BLOCKED
+from price_panel.infra import config
+from price_panel.infra.db import DatabaseError
+from price_panel.infra.logger import get_logger
+from price_panel.infra.warehouse import Warehouse
+from price_panel.marketplaces.ozon import parse
 
 log = get_logger("pipeline")
 
 # Ошибки, при которых SKU вообще не обрабатывался: в скорость не входят.
 # blocked - прогон остановлен предохранителем (Ozon отказывал SKU подряд).
 NOT_ATTEMPTED = ("not_processed", "interrupted", "blocked")
-
-# Код выхода parse, если прогон остановил предохранитель. Планировщик по нему
-# отличает блокировку Ozon (имеет смысл повторить через несколько часов) от
-# прочих неудач (повтор не поможет).
-EXIT_BLOCKED = 3
 
 
 class ParseLockBusy(RuntimeError):

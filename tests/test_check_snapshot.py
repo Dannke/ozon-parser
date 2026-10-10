@@ -17,7 +17,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from price_panel import check, config, storage
+from price_panel.infra import config
+from price_panel.legacy import check, storage
 
 SAMPLE = {
     "sku": "2359066702",

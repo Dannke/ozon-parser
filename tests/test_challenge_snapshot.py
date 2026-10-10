@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Page
 
-from price_panel import browser
+from price_panel.infra import browser
 
 
 class StuckChallengePage:

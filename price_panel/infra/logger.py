@@ -14,7 +14,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path(os.getenv("PRICE_PANEL_LOG_DIR") or Path(__file__).resolve().parent.parent / "logs")
+LOG_DIR = Path(os.getenv("PRICE_PANEL_LOG_DIR") or Path(__file__).resolve().parents[2] / "logs")
 LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)-12s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 

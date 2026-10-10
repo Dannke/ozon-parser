@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from price_panel import config, login, session
-from price_panel.gmail import GmailCodeReader, GmailError, GmailSettings
+from price_panel.infra import config
+from price_panel.marketplaces.ozon import login, session
+from price_panel.marketplaces.ozon.gmail import GmailCodeReader, GmailError, GmailSettings
 
 
 def write_session(path: Path, names=("__Secure-access-token",), age_days: float = 0) -> Path:

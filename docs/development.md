@@ -135,10 +135,21 @@ Pyright проверяет типы с теми же настройками, ч�
 (`[tool.pyright]` в `pyproject.toml`). Правила ruff — там же. Целевая версия —
 Python 3.11.
 
+```bash
+lint-imports
+```
+
+`lint-imports` (import-linter) проверяет слои пакета: `app` → `marketplaces` →
+`infra` → `core`, нижний слой не импортирует верхний, а конвейер не опирается
+на `legacy` (см. [architecture.md](architecture.md#слои)). Новый модуль кладут
+в слой по тому, что он импортирует. Если правило мешает, значит, модуль лежит
+не там или ему нужен шов, а не исключение в `ignore_imports`.
+
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) на каждый PR и push в `main`
-запускает ruff (линтер и формат), pyright и все тесты на Python 3.11. Тестовую базу даёт
+запускает ruff (линтер и формат), pyright, `lint-imports` и все тесты на
+Python 3.11. Тестовую базу даёт
 сервис PostgreSQL, браузер ставит Playwright, поэтому проверки базы и эталоны
 в CI не пропускаются. В сеть тесты по-прежнему не ходят.
 
@@ -146,7 +157,7 @@ GitHub Actions (`.github/workflows/ci.yml`) на каждый PR и push в `mai
 
 Схема меняется только новой миграцией, уже применённые файлы не правятся:
 
-1. Создайте `price_panel/migrations/NNNN_описание.sql` со следующим номером.
+1. Создайте `price_panel/infra/migrations/NNNN_описание.sql` со следующим номером.
 2. Пишите SQL, рассчитанный на однократное применение: миграции идут одной
    транзакцией по порядку номеров, учёт — в `schema_migrations`.
 3. Проверьте на тестовой базе: `TEST_PG_DSN=... pytest tests/test_warehouse.py`.

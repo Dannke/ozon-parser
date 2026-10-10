@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from price_panel import backup
+from price_panel.infra import backup
 
 DAY = dt.date(2026, 10, 6)
 LISTING = (
