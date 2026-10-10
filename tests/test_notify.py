@@ -308,6 +308,17 @@ def test_final_message_stays_queued_after_all_retries(configured, outbox):
     assert "сбор не начался" in entry["text"]
 
 
+def test_final_message_survives_a_killed_process(configured, outbox):
+    """10.10.2026: процесс прервали между повторами - итог не должен пропасть."""
+    def killed(seconds):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        notify.report_job(1, True, opener=Flaky(fail_times=99), sleep=killed)
+    (entry,) = json.loads(outbox.read_text(encoding="utf-8"))
+    assert entry["text"].startswith("❌")
+
+
 def test_rejected_message_is_neither_retried_nor_queued(configured, outbox):
     """HTTP 4xx (неверный чат, токен) - повторять бессмысленно; очередь не застревает."""
     error = urllib.error.HTTPError("https://api.telegram.org/", 400, "Bad Request",

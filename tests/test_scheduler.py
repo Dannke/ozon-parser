@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import socket
 import subprocess
 import sys
+
+import pytest
 
 from price_panel import scheduler
 from price_panel.db import DatabaseError
@@ -15,6 +18,23 @@ MSK = scheduler.get_timezone("Europe/Moscow")
 BASE = {"discovery": {"categories": [
     {"name": "phones", "url": "https://www.ozon.ru/category/smartfony-15502/",
      "panel_size": 5}]}}
+
+
+@pytest.fixture(autouse=True)
+def network(monkeypatch):
+    """Сеть «есть» без настоящего DNS; network.down - сколько проверок подряд её нет."""
+    class Network:
+        down = 0
+        checks = 0
+
+    def resolve(host, port):
+        Network.checks += 1
+        if Network.checks <= Network.down:
+            raise socket.gaierror(11001, "getaddrinfo failed")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("185.73.193.68", port))]
+
+    monkeypatch.setattr(scheduler.socket, "getaddrinfo", resolve)
+    return Network
 
 
 def settings(backup=None, **schedule):
@@ -130,6 +150,32 @@ def test_retries_are_limited(monkeypatch):
                              clock=clock, sleep=clock.sleep)
     assert code == EXIT_BLOCKED
     assert len(calls) == 3
+
+
+def test_job_waits_for_network_before_start(monkeypatch, network):
+    """10.10.2026: компьютер включился в 12:42, в 12:45 сети ещё не было."""
+    clock = FakeClock()
+    network.down = 2
+    events = []
+    monkeypatch.setattr(scheduler.notify, "report_start",
+                        lambda details=None: events.append(("start", clock.slept)))
+    scripted_parse(monkeypatch, clock, [0])
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
+                             sleep=clock.sleep) == 0
+    assert events == [("start", 2 * scheduler.NETWORK_POLL_SECONDS)]
+
+
+def test_job_runs_anyway_when_network_never_comes(monkeypatch, network):
+    """Сеть так и не появилась - прогон всё равно идёт, его неудача попадёт в итог."""
+    clock = FakeClock()
+    network.down = 10_000
+    calls = scripted_parse(monkeypatch, clock, [1])
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
+                             sleep=clock.sleep) == 1
+    assert len(calls) == 1
+    assert clock.slept == scheduler.NETWORK_WAIT_SECONDS
+    # Ожидание съело часть общего предела прогона, а не продлило его.
+    assert calls[0] == 10 * 3600 - scheduler.NETWORK_WAIT_SECONDS
 
 
 def test_ordinary_failure_is_not_retried(monkeypatch):

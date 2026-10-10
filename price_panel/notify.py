@@ -228,6 +228,10 @@ def send_telegram(text: str, opener: Callable = urllib.request.urlopen,
         text = text[:MAX_MESSAGE_CHARS - 1] + "…"
     entry = {"created": _clock(), "text": text}
     pending = load_outbox() + [entry]
+    if queue:
+        # Сначала на диск: 10.10.2026 процесс прервали между повторами, и итог
+        # дня пропал вместе с ним. Из очереди сообщение уберёт доставка.
+        _save_outbox(pending)
     delivered: list = []
     for delay in (0, *retry_delays):
         if delay:
