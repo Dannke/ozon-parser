@@ -6,6 +6,10 @@
 (перезапуск PostgreSQL посреди ночного прогона), операция повторяется один
 раз на новом соединении.
 
+Хранилище привязано к одному маркетплейсу: все чтения и записи - только его
+строки (колонка marketplace, docs/adr/0002-multi-marketplace-data.md), а
+блокировка прогона - своя у каждого маркетплейса.
+
 Схема задаётся файлами price_panel/infra/migrations/NNNN_*.sql. Они применяются по
 порядку номеров, каждая ровно один раз, - учёт ведётся в schema_migrations.
 Руками ничего запускать не нужно: миграции проверяются при старте каждой
@@ -20,6 +24,7 @@ from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
 
+from price_panel.core.models import OZON
 from price_panel.core.sampling import PanelPick
 from price_panel.infra import config, db
 from price_panel.infra.logger import get_logger
@@ -29,7 +34,9 @@ log = get_logger("warehouse")
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 # Ключи advisory lock: миграции не должны идти из двух процессов разом, а два
-# прогона парсера - поднимать два браузера и писать в один день дважды.
+# прогона парсера одного маркетплейса - поднимать два браузера и писать в один
+# день дважды. Второй ключ блокировки прогона - hashtext(маркетплейс): прогоны
+# разных маркетплейсов друг друга не ждут.
 MIGRATION_LOCK = 72_001
 PARSE_LOCK = 72_002
 
@@ -42,9 +49,10 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 PANEL_UPSERT = """
 INSERT INTO sku_panel (
-    sku, category, source, source_url, position, page, sampling_group, discovery_run_id
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (sku) DO UPDATE SET
+    marketplace, sku, category, source, source_url, position, page, sampling_group,
+    discovery_run_id
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (marketplace, sku) DO UPDATE SET
     category = EXCLUDED.category,
     source = EXCLUDED.source,
     source_url = EXCLUDED.source_url,
@@ -63,14 +71,14 @@ WHERE NOT sku_panel.is_active
 # полных характеристик - пустые значения не должны затирать известные.
 PRODUCT_UPSERT = """
 INSERT INTO products (
-    sku, title, cover_image, color, material, art_set, has_rich_content,
+    marketplace, sku, title, cover_image, color, material, art_set, has_rich_content,
     photos_seller, videos_seller, first_seen_at, last_seen_at, last_run_id
 ) VALUES (
-    %(sku)s, %(title)s, %(cover_image)s, %(color)s, %(material)s, %(art_set)s,
-    %(has_rich_content)s, %(photos_seller)s, %(videos_seller)s,
+    %(marketplace)s, %(sku)s, %(title)s, %(cover_image)s, %(color)s, %(material)s,
+    %(art_set)s, %(has_rich_content)s, %(photos_seller)s, %(videos_seller)s,
     %(collected_at)s, %(collected_at)s, %(run_id)s
 )
-ON CONFLICT (sku) DO UPDATE SET
+ON CONFLICT (marketplace, sku) DO UPDATE SET
     title = COALESCE(EXCLUDED.title, products.title),
     cover_image = COALESCE(EXCLUDED.cover_image, products.cover_image),
     color = COALESCE(EXCLUDED.color, products.color),
@@ -87,11 +95,12 @@ ON CONFLICT (sku) DO UPDATE SET
 # записи в рамках одного прогона обновляет ту же строку, а не плодит дубль.
 PRICE_UPSERT = """
 INSERT INTO price_history (
-    run_id, sku, collected_at, price, card_price, old_price, discount_pct,
+    marketplace, run_id, sku, collected_at, price, card_price, old_price, discount_pct,
     is_available, rating, reviews_total, source
 ) VALUES (
-    %(run_id)s, %(sku)s, %(collected_at)s, %(price)s, %(card_price)s, %(old_price)s,
-    %(discount_pct)s, %(is_available)s, %(rating)s, %(reviews_total)s, %(source)s
+    %(marketplace)s, %(run_id)s, %(sku)s, %(collected_at)s, %(price)s, %(card_price)s,
+    %(old_price)s, %(discount_pct)s, %(is_available)s, %(rating)s, %(reviews_total)s,
+    %(source)s
 )
 ON CONFLICT (run_id, sku) DO UPDATE SET
     collected_at = EXCLUDED.collected_at,
@@ -107,15 +116,17 @@ ON CONFLICT (run_id, sku) DO UPDATE SET
 
 # Очередь парсинга: никогда не пробованные SKU, затем самые давние попытки.
 # Ошибки not_processed / interrupted / blocked - не попытка: до SKU не дошли.
+# Первые два параметра - маркетплейс для истории и ошибок.
 PANEL_QUEUE = """
 SELECT sp.sku
 FROM sku_panel sp
 LEFT JOIN (
-    SELECT sku, max(collected_at) AS at FROM price_history GROUP BY sku
+    SELECT sku, max(collected_at) AS at FROM price_history
+    WHERE marketplace = %s GROUP BY sku
 ) ok ON ok.sku = sp.sku
 LEFT JOIN (
     SELECT sku, max(occurred_at) AS at FROM parse_errors
-    WHERE error_type NOT IN ('not_processed', 'interrupted', 'blocked')
+    WHERE marketplace = %s AND error_type NOT IN ('not_processed', 'interrupted', 'blocked')
     GROUP BY sku
 ) err ON err.sku = sp.sku
 {where}
@@ -141,7 +152,7 @@ FROM (
                     (SELECT max(occurred_at) FROM parse_errors pe WHERE pe.run_id = p.run_id))
                AS last_activity
     FROM parse_runs p
-    WHERE p.status = 'running'
+    WHERE p.status = 'running' AND p.marketplace = %s
 ) s
 WHERE r.run_id = s.run_id
 """
@@ -195,12 +206,17 @@ def product_params(run_id: int, product: dict, collected_at: dt.datetime) -> dic
 
 
 class Warehouse:
-    """Соединение с PostgreSQL и операции конвейера."""
+    """Соединение с PostgreSQL и операции конвейера одного маркетплейса.
 
-    def __init__(self, dsn: str = ""):
+    :param marketplace: код из таблицы marketplaces; пока конвейер собирает
+        только Ozon, он же по умолчанию.
+    """
+
+    def __init__(self, dsn: str = "", marketplace: str = OZON):
         self.dsn = dsn or config.PG_DSN
         if not self.dsn:
             raise db.DatabaseError("Не задан PG_DSN (см. .env)")
+        self.marketplace = marketplace
         self._psycopg2 = db._import_psycopg2()
         self._connection = None
 
@@ -287,8 +303,8 @@ class Warehouse:
         def query(cursor) -> dict:
             cursor.execute(
                 "SELECT sampling_group, count(*) FROM sku_panel "
-                "WHERE is_active AND category = %s GROUP BY sampling_group",
-                (category,),
+                "WHERE marketplace = %s AND is_active AND category = %s GROUP BY sampling_group",
+                (self.marketplace, category),
             )
             return {group: count for group, count in cursor.fetchall()}
 
@@ -296,7 +312,10 @@ class Warehouse:
 
     def active_panel_skus(self) -> set:
         def query(cursor) -> set:
-            cursor.execute("SELECT sku FROM sku_panel WHERE is_active")
+            cursor.execute(
+                "SELECT sku FROM sku_panel WHERE marketplace = %s AND is_active",
+                (self.marketplace,),
+            )
             return {row[0] for row in cursor.fetchall()}
 
         return self.run(query)
@@ -322,7 +341,8 @@ class Warehouse:
         missing_since - только SKU без успешного наблюдения с этого момента:
         повтор после блокировки добирает недостающее, а не обходит panel заново.
         """
-        where, params = "WHERE sp.is_active", []
+        where = "WHERE sp.marketplace = %s AND sp.is_active"
+        params: list = [self.marketplace, self.marketplace, self.marketplace]
         names = list(categories or [])
         if names:
             where += " AND sp.category = ANY(%s)"
@@ -351,6 +371,7 @@ class Warehouse:
         """
         rows = [
             (
+                self.marketplace,
                 p.candidate.sku,
                 category,
                 source,
@@ -380,7 +401,9 @@ class Warehouse:
 
         def update(cursor) -> int:
             cursor.execute(
-                "UPDATE sku_panel SET last_seen_at = now() WHERE sku = ANY(%s)", (values,)
+                "UPDATE sku_panel SET last_seen_at = now() "
+                "WHERE marketplace = %s AND sku = ANY(%s)",
+                (self.marketplace, values),
             )
             return cursor.rowcount
 
@@ -392,8 +415,8 @@ class Warehouse:
         def update(cursor) -> int:
             cursor.execute(
                 "UPDATE sku_panel SET is_active = FALSE, deactivated_at = now(), "
-                "updated_at = now() WHERE is_active AND category = %s",
-                (category,),
+                "updated_at = now() WHERE marketplace = %s AND is_active AND category = %s",
+                (self.marketplace, category),
             )
             return cursor.rowcount
 
@@ -405,7 +428,8 @@ class Warehouse:
         def query(cursor) -> list:
             cursor.execute(
                 "SELECT category, sampling_group, active_sku, inactive_sku "
-                "FROM v_panel_summary ORDER BY category, sampling_group"
+                "FROM v_panel_summary WHERE marketplace = %s ORDER BY category, sampling_group",
+                (self.marketplace,),
             )
             return cursor.fetchall()
 
@@ -424,9 +448,9 @@ class Warehouse:
     def start_discovery_run(self, category: str, source: str, seed: str) -> int:
         def insert(cursor) -> int:
             cursor.execute(
-                "INSERT INTO discovery_runs (category, source, seed) VALUES (%s, %s, %s) "
-                "RETURNING id",
-                (category, source, seed),
+                "INSERT INTO discovery_runs (marketplace, category, source, seed) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (self.marketplace, category, source, seed),
             )
             return cursor.fetchone()[0]
 
@@ -465,7 +489,9 @@ class Warehouse:
         """Блокировка «идёт прогон парсера» на время жизни соединения."""
 
         def query(cursor) -> bool:
-            cursor.execute("SELECT pg_try_advisory_lock(%s)", (PARSE_LOCK,))
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(%s, hashtext(%s))", (PARSE_LOCK, self.marketplace)
+            )
             return bool(cursor.fetchone()[0])
 
         return self.run(query)
@@ -473,8 +499,9 @@ class Warehouse:
     def close_stale_runs(self) -> int:
         """Помечает прогоны, брошенные упавшим процессом, как прерванные.
 
-        Вызывается только под PARSE_LOCK: раз блокировка наша, живых прогонов
-        кроме текущего нет, и всё, что осталось в статусе running, - брошено.
+        Вызывается только под блокировкой прогона этого маркетплейса: раз она
+        наша, его живых прогонов кроме текущего нет, и всё, что осталось в
+        статусе running, - брошено. Прогоны других маркетплейсов не трогаются.
 
         Брошенный прогон не успел записать итог (так бывает, когда компьютер
         выключили посреди прогона), поэтому счётчики и время окончания
@@ -482,7 +509,7 @@ class Warehouse:
         """
 
         def update(cursor) -> int:
-            cursor.execute(STALE_RUNS_UPDATE)
+            cursor.execute(STALE_RUNS_UPDATE, (self.marketplace,))
             return cursor.rowcount
 
         return self.run(update)
@@ -492,9 +519,9 @@ class Warehouse:
     ) -> int:
         def insert(cursor) -> int:
             cursor.execute(
-                "INSERT INTO parse_runs (kind, sku_source, total_sku, request_delay) "
-                "VALUES (%s, %s, %s, %s) RETURNING run_id",
-                (kind, sku_source, total_sku, request_delay),
+                "INSERT INTO parse_runs (marketplace, kind, sku_source, total_sku, request_delay) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING run_id",
+                (self.marketplace, kind, sku_source, total_sku, request_delay),
             )
             return cursor.fetchone()[0]
 
@@ -536,6 +563,7 @@ class Warehouse:
     ) -> None:
         """Сохраняет карточку и наблюдение цены - одной транзакцией."""
         params = product_params(run_id, product, collected_at or dt.datetime.now(dt.UTC))
+        params["marketplace"] = self.marketplace
 
         def write(cursor) -> None:
             cursor.execute(PRODUCT_UPSERT, params)
@@ -553,9 +581,9 @@ class Warehouse:
         def query(cursor) -> set:
             cursor.execute(
                 "SELECT s.sku FROM unnest(%s::text[]) AS s(sku) "
-                "LEFT JOIN products p ON p.sku = s.sku "
+                "LEFT JOIN products p ON p.marketplace = %s AND p.sku = s.sku "
                 "WHERE p.sku IS NULL OR p.has_rich_content IS NULL",
-                (values,),
+                (values, self.marketplace),
             )
             return {row[0] for row in cursor.fetchall()}
 
@@ -566,9 +594,10 @@ class Warehouse:
     ) -> None:
         def insert(cursor) -> None:
             cursor.execute(
-                "INSERT INTO parse_errors (run_id, sku, error_type, error_message, attempts) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (run_id, sku, error_type, (message or "")[:2000], attempts),
+                "INSERT INTO parse_errors "
+                "(marketplace, run_id, sku, error_type, error_message, attempts) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (self.marketplace, run_id, sku, error_type, (message or "")[:2000], attempts),
             )
 
         self.run(insert)
@@ -591,8 +620,8 @@ class Warehouse:
             cursor.execute(
                 "SELECT run_id, kind, status, started_at, total_sku, success_count, "
                 "error_count, duration_seconds, sku_per_minute, avg_sku_seconds, request_delay "
-                "FROM parse_runs ORDER BY run_id DESC LIMIT %s",
-                (limit,),
+                "FROM parse_runs WHERE marketplace = %s ORDER BY run_id DESC LIMIT %s",
+                (self.marketplace, limit),
             )
             return cursor.fetchall()
 
@@ -603,7 +632,9 @@ class Warehouse:
 
         def query(cursor) -> tuple:
             cursor.execute(
-                "SELECT count(*), count(DISTINCT sku), count(DISTINCT run_id) FROM price_history"
+                "SELECT count(*), count(DISTINCT sku), count(DISTINCT run_id) FROM price_history "
+                "WHERE marketplace = %s",
+                (self.marketplace,),
             )
             return tuple(cursor.fetchone())
 
