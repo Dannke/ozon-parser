@@ -15,7 +15,7 @@ import urllib.parse
 
 import pytest
 
-from price_panel import config, notify
+from price_panel.infra import config, notify
 
 TOKEN = "123456:SECRET-TOKEN"
 

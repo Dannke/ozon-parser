@@ -14,8 +14,8 @@
 
 ## Зависимость от сайта Ozon
 
-- Селекторы формы входа (`*_SELECTORS` в `price_panel/login.py`) и имена
-  виджетов (`W_*` в `price_panel/extract.py`) заданы списками с запасными
+- Селекторы формы входа (`*_SELECTORS` в `price_panel/marketplaces/ozon/login.py`) и имена
+  виджетов (`W_*` в `price_panel/marketplaces/ozon/extract.py`) заданы списками с запасными
   вариантами. При изменениях на сайте править нужно их.
 - Discovery опирается на внутренний API фронтенда Ozon (`entrypoint-api`) и
   виджет `tileGridDesktop` — это не публичный API. Если Ozon изменит формат,

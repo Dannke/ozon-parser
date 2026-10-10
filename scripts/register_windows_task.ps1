@@ -30,8 +30,8 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 
 $code = @"
 import datetime as dt
-from price_panel.settings import load_settings
-from price_panel.scheduler import get_timezone, next_run_at
+from price_panel.app.settings import load_settings
+from price_panel.app.scheduler import get_timezone, next_run_at
 s = load_settings()
 target = next_run_at(dt.datetime.now(dt.timezone.utc), s.schedule.daily_at,
                      get_timezone(s.schedule.timezone))

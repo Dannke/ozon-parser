@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, constants
+from price_panel.infra import config
+from price_panel.marketplaces.ozon import constants
 
 DEFAULT_PATH = config.BASE_DIR / "config.yaml"
 DEFAULT_BACKUP_DIR = config.BASE_DIR / "backups"

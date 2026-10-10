@@ -15,8 +15,10 @@ from typing import cast
 import pytest
 from playwright.sync_api import Page
 
-from price_panel import config, parse, session, storage
-from price_panel.parse import SkuOutcome
+from price_panel.infra import config
+from price_panel.legacy import storage
+from price_panel.marketplaces.ozon import parse, session
+from price_panel.marketplaces.ozon.parse import SkuOutcome
 
 
 class FakePage:

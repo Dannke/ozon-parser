@@ -31,21 +31,55 @@ dev = [
     "jinja2==3.1.6",
     "ruff==0.16.8",
     "pyright==1.1.414",
+    # Правило зависимостей между слоями пакета: lint-imports (см. ниже).
+    "import-linter==2.15",
 ]
 
 # ozon-* - точки входа старого сценария (только Ozon), имена сохранены.
 [project.scripts]
 price-panel = "price_panel.__main__:main"
-ozon-parse = "price_panel.parse:main"
-ozon-login = "price_panel.login:main"
-ozon-check = "price_panel.check:main"
+ozon-parse = "price_panel.marketplaces.ozon.parse:main"
+ozon-login = "price_panel.marketplaces.ozon.login:main"
+ozon-check = "price_panel.legacy.check:main"
 
-[tool.setuptools]
-packages = ["price_panel"]
+[tool.setuptools.packages.find]
+include = ["price_panel*"]
 
 [tool.setuptools.package-data]
-# Миграции схемы применяются из пакета (price_panel.warehouse.migrate).
-price_panel = ["migrations/*.sql"]
+# Миграции схемы применяются из пакета (price_panel.infra.warehouse.migrate).
+"price_panel.infra" = ["migrations/*.sql"]
+
+# Слои пакета (docs/architecture.md#слои): верхний слой может импортировать
+# нижние, нижний верхние - нет. Проверка: lint-imports (и в CI).
+[tool.importlinter]
+root_package = "price_panel"
+
+[[tool.importlinter.contracts]]
+name = "Слои: app -> marketplaces -> infra -> core"
+type = "layers"
+layers = [
+    "price_panel.app",
+    "price_panel.marketplaces",
+    "price_panel.infra",
+    "price_panel.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "Старый сценарий - не опора для конвейера"
+type = "forbidden"
+source_modules = [
+    "price_panel.core",
+    "price_panel.infra",
+    "price_panel.marketplaces",
+    "price_panel.app",
+]
+forbidden_modules = ["price_panel.legacy"]
+ignore_imports = [
+    # Долг: парсер Ozon сам пишет CSV и таблицу старого сценария. Уходит, когда
+    # цикл сбора переедет в ядро, а сохранение - в legacy (см. план, Phase 4b).
+    "price_panel.marketplaces.ozon.parse -> price_panel.legacy.cli",
+    "price_panel.marketplaces.ozon.parse -> price_panel.legacy.storage",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

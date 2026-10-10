@@ -1,4 +1,5 @@
-# Проверки на каждый PR и push в main: ruff (линтер и формат), pyright, все тесты.
+# Проверки на каждый PR и push в main: ruff (линтер и формат), pyright, слои
+# пакета (lint-imports), все тесты.
 #
 # Тесты идут с настоящим PostgreSQL (сервис ниже) и браузером Playwright, так
 # что проверки базы и сквозные эталоны (tests/golden) здесь не пропускаются.
@@ -55,6 +56,9 @@ jobs:
 
       - name: Pyright
         run: .venv/bin/pyright
+
+      - name: Import layers
+        run: .venv/bin/lint-imports
 
       - name: Tests
         run: .venv/bin/pytest -rs

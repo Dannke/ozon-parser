@@ -36,8 +36,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .logger import get_logger
-from .secrets_fs import write_private
+from price_panel.infra.logger import get_logger
+from price_panel.infra.secrets_fs import write_private
 
 log = get_logger("gmail")
 

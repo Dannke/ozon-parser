@@ -16,7 +16,7 @@
 python parse_ozon.py 2359066702 2829800382
 ```
 
-Без аргументов берётся список `DEFAULT_SKUS` из `price_panel/config.py`.
+Без аргументов берётся список `DEFAULT_SKUS` из `price_panel/infra/config.py`.
 Список можно читать из файла:
 
 ```bash

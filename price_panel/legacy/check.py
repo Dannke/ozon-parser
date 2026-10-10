@@ -19,8 +19,9 @@ import csv
 import datetime as dt
 import sys
 
-from . import cli, config, db
-from .logger import get_logger
+from price_panel.infra import config, db
+from price_panel.infra.logger import get_logger
+from price_panel.legacy import cli
 
 log = get_logger("check_snapshot")
 

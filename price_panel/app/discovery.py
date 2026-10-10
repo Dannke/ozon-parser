@@ -46,12 +46,8 @@ from dataclasses import dataclass, field
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 
-from . import browser as browser_utils
-from . import config, constants, session
-from .db import DatabaseError
-from .logger import get_logger
-from .parse import API_BASE, FETCH_JSON_JS
-from .sampling import (
+from price_panel.app.settings import SOURCE_DATA_OZON, CategoryConfig, Settings
+from price_panel.core.sampling import (
     GROUP_TAIL,
     GROUP_TOP,
     Candidate,
@@ -62,8 +58,13 @@ from .sampling import (
     select_panel,
     sku_from_url,
 )
-from .settings import SOURCE_DATA_OZON, CategoryConfig, Settings
-from .warehouse import Warehouse
+from price_panel.infra import browser as browser_utils
+from price_panel.infra import config
+from price_panel.infra.db import DatabaseError
+from price_panel.infra.logger import get_logger
+from price_panel.infra.warehouse import Warehouse
+from price_panel.marketplaces.ozon import constants, session
+from price_panel.marketplaces.ozon.parse import API_BASE, FETCH_JSON_JS
 
 log = get_logger("discovery")
 

@@ -40,10 +40,11 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from . import browser as browser_utils
-from . import config, logger, session
-from .gmail import GmailCodeReader, GmailError, GmailSettings
-from .logger import get_logger
+from price_panel.infra import browser as browser_utils
+from price_panel.infra import config, logger
+from price_panel.infra.logger import get_logger
+from price_panel.marketplaces.ozon import session
+from price_panel.marketplaces.ozon.gmail import GmailCodeReader, GmailError, GmailSettings
 
 log = get_logger("get_cookies")
 

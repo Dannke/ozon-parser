@@ -17,19 +17,6 @@ CHALLENGE_BODY_MARKERS = (
     "captcha",
 )
 
-# Заголовок страницы у заглушки Ozon ("Antibot Challenge Page").
-CHALLENGE_TITLE_MARKERS = ("antibot", "challenge", "доступ ограничен")
-
-# Видимый текст, по которому опознаём проверку, если заголовок ни о чём не
-# говорит. Искать эти слова в СЫРОМ html нельзя: они встречаются в скриптах
-# совершенно обычных страниц.
-CHALLENGE_TEXT_MARKERS = (
-    "доступ ограничен",
-    "access denied",
-    "вы не робот",
-    "подтвердите, что вы",
-)
-
 # Откуда парсер берёт цену и остальные поля первой части карточки
 # (parse.ParseOptions, parser.price_source в config.yaml).
 PRICE_SOURCE_API = "api"

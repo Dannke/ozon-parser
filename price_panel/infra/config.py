@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 
 # Корень проекта: пакет лежит уровнем ниже, а .env, cookies.json и data/
 # - рядом с точками входа, в корне.
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Корень проекта: price_panel/infra/config.py -> три уровня вверх.
+BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
 

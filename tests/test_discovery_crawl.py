@@ -15,9 +15,10 @@ import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
-from price_panel import config, discovery
-from price_panel.sampling import Candidate, listing_position, make_rng
-from price_panel.settings import CategoryConfig
+from price_panel.app import discovery
+from price_panel.app.settings import CategoryConfig
+from price_panel.core.sampling import Candidate, listing_position, make_rng
+from price_panel.infra import config
 
 CATEGORY = CategoryConfig(
     name="phones",

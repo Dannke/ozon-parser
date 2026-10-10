@@ -16,9 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from price_panel import parse, warehouse
-from price_panel.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
-from price_panel.warehouse import Warehouse
+from price_panel.core.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
+from price_panel.infra import warehouse
+from price_panel.infra.warehouse import Warehouse
+from price_panel.marketplaces.ozon import parse
 
 TEST_DSN = os.getenv("TEST_PG_DSN", "")
 

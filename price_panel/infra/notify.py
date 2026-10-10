@@ -36,9 +36,9 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 
-from . import config
-from .logger import get_logger
-from .pipeline import EXIT_BLOCKED
+from price_panel.core.models import EXIT_BLOCKED
+from price_panel.infra import config
+from price_panel.infra.logger import get_logger
 
 log = get_logger("notify")
 

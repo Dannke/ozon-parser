@@ -12,11 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from price_panel import config, parse, pipeline, session, storage
-from price_panel.db import DatabaseError
-from price_panel.parse import SkuOutcome
-from price_panel.settings import parse_settings
-from price_panel.warehouse import Warehouse
+from price_panel.app import pipeline
+from price_panel.app.settings import parse_settings
+from price_panel.infra import config
+from price_panel.infra.db import DatabaseError
+from price_panel.infra.warehouse import Warehouse
+from price_panel.legacy import storage
+from price_panel.marketplaces.ozon import parse, session
+from price_panel.marketplaces.ozon.parse import SkuOutcome
 
 SETTINGS_DATA = {
     "discovery": {

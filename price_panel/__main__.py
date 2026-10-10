@@ -21,11 +21,12 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from . import backup, config, discovery, notify, pipeline, scheduler
-from .db import DatabaseError
-from .logger import get_logger
-from .settings import Settings, SettingsError, load_settings
-from .warehouse import Warehouse
+from price_panel.app import discovery, pipeline, scheduler
+from price_panel.app.settings import Settings, SettingsError, load_settings
+from price_panel.infra import backup, config, notify
+from price_panel.infra.db import DatabaseError
+from price_panel.infra.logger import get_logger
+from price_panel.infra.warehouse import Warehouse
 
 log = get_logger("pipeline")
 
@@ -134,7 +135,7 @@ def _today_start(settings: Settings) -> dt.datetime:
 
 def _skus_for_parse(args, wh: Warehouse, settings: Settings) -> tuple:
     """(список SKU, откуда он взят)."""
-    from .parse import read_skus_file, select_range
+    from price_panel.marketplaces.ozon.parse import read_skus_file, select_range
 
     if args.skus:
         skus, source = list(dict.fromkeys(args.skus)), "args"
@@ -168,7 +169,7 @@ def cmd_benchmark(args, settings: Settings) -> int:
     size = args.sample or settings.benchmark.sample_size
     with _warehouse() as wh:
         if args.file:
-            from .parse import read_skus_file
+            from price_panel.marketplaces.ozon.parse import read_skus_file
 
             skus, source = read_skus_file(args.file)[:size], "file"
         else:

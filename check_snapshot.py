@@ -1,6 +1,6 @@
 """Проверка, что срез за указанную дату попал в хранилище.
 
-Точка входа: вся логика живёт в price_panel.check. Файл оставлен в корне намеренно -
+Точка входа: вся логика живёт в price_panel.legacy.check. Файл оставлен в корне намеренно -
 на него ссылаются README и команды Airflow DAG, и привычка запускать
 `python check_snapshot.py` ничего не должна стоить.
 
@@ -14,7 +14,7 @@
 
 import sys
 
-from price_panel.check import main
+from price_panel.legacy.check import main
 
 if __name__ == "__main__":
     sys.exit(main())

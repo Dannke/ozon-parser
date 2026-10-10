@@ -26,9 +26,9 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import config, db
-from .extract import FIELDS
-from .logger import get_logger
+from price_panel.infra import config, db
+from price_panel.infra.logger import get_logger
+from price_panel.marketplaces.ozon.extract import FIELDS
 
 log = get_logger("storage")
 

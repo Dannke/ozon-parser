@@ -55,7 +55,7 @@ def wh():
         pytest.skip("TEST_PG_DSN не задан")
     if "test" not in urllib.parse.urlsplit(TEST_DSN).path:
         pytest.skip("TEST_PG_DSN должен указывать на тестовую базу (имя содержит 'test')")
-    from price_panel.warehouse import Warehouse
+    from price_panel.infra.warehouse import Warehouse
 
     store = Warehouse(TEST_DSN)
     store.run(lambda cursor: cursor.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))

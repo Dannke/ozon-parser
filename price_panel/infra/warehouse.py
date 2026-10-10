@@ -6,7 +6,7 @@
 (перезапуск PostgreSQL посреди ночного прогона), операция повторяется один
 раз на новом соединении.
 
-Схема задаётся файлами price_panel/migrations/NNNN_*.sql. Они применяются по
+Схема задаётся файлами price_panel/infra/migrations/NNNN_*.sql. Они применяются по
 порядку номеров, каждая ровно один раз, - учёт ведётся в schema_migrations.
 Руками ничего запускать не нужно: миграции проверяются при старте каждой
 команды python -m price_panel.
@@ -20,9 +20,9 @@ from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
 
-from . import config, db
-from .logger import get_logger
-from .sampling import PanelPick
+from price_panel.core.sampling import PanelPick
+from price_panel.infra import config, db
+from price_panel.infra.logger import get_logger
 
 log = get_logger("warehouse")
 

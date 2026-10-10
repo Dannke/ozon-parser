@@ -27,8 +27,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config
-from .logger import get_logger
+from price_panel.infra import config
+from price_panel.infra.logger import get_logger
 
 log = get_logger("backup")
 

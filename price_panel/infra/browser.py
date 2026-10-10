@@ -17,10 +17,23 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from . import config, constants, logger
-from .logger import get_logger
+from price_panel.infra import config, logger
+from price_panel.infra.logger import get_logger
 
 log = get_logger("browser")
+
+# Заголовок страницы у заглушки Ozon ("Antibot Challenge Page").
+CHALLENGE_TITLE_MARKERS = ("antibot", "challenge", "доступ ограничен")
+
+# Видимый текст, по которому опознаём проверку, если заголовок ни о чём не
+# говорит. Искать эти слова в СЫРОМ html нельзя: они встречаются в скриптах
+# совершенно обычных страниц.
+CHALLENGE_TEXT_MARKERS = (
+    "доступ ограничен",
+    "access denied",
+    "вы не робот",
+    "подтвердите, что вы",
+)
 
 # Снимки непройденной антибот-проверки: чтобы видеть, что именно показал
 # Ozon (капча, бесконечная проверка, заглушка). Не больше N за процесс и не
@@ -126,14 +139,14 @@ def looks_like_challenge(page: Page, response=None) -> bool:
         title = (page.title() or "").lower()
     except PlaywrightError:
         title = ""
-    if any(marker in title for marker in constants.CHALLENGE_TITLE_MARKERS):
+    if any(marker in title for marker in CHALLENGE_TITLE_MARKERS):
         return True
 
     try:
         visible = (page.inner_text("body", timeout=5_000) or "").lower()
     except PlaywrightError:
         return False
-    return any(marker in visible for marker in constants.CHALLENGE_TEXT_MARKERS)
+    return any(marker in visible for marker in CHALLENGE_TEXT_MARKERS)
 
 
 def pass_challenge(page: Page, response=None, timeout: int | None = None) -> bool:

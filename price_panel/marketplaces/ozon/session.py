@@ -10,8 +10,9 @@ import json
 import time
 from pathlib import Path
 
-from . import constants, secrets_fs
-from .logger import get_logger
+from price_panel.infra import secrets_fs
+from price_panel.infra.logger import get_logger
+from price_panel.marketplaces.ozon import constants
 
 log = get_logger("session")
 

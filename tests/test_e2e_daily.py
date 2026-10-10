@@ -19,9 +19,9 @@ import urllib.parse
 from test_extract import FIXTURE, FIXTURE_MINIMAL
 
 from price_panel import __main__ as cli
-from price_panel import browser as browser_utils
-from price_panel import config
-from price_panel.sampling import GROUP_TOP, Candidate, PanelPick
+from price_panel.core.sampling import GROUP_TOP, Candidate, PanelPick
+from price_panel.infra import browser as browser_utils
+from price_panel.infra import config
 
 CARDS = {"1001": FIXTURE, "1002": FIXTURE_MINIMAL}
 MISSING = "404404"
