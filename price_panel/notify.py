@@ -34,8 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
-from typing import Callable, Optional
+from collections.abc import Callable, Sequence
 
 from . import config
 from .logger import get_logger
@@ -137,8 +136,10 @@ def telegram_enabled() -> bool:
 # ------------------------------------------------------------------ очередь --
 def _valid_entry(entry, now: float) -> bool:
     try:
-        return (isinstance(entry.get("text"), str)
-                and now - float(entry["created"]) <= OUTBOX_MAX_AGE_SECONDS)
+        return (
+            isinstance(entry.get("text"), str)
+            and now - float(entry["created"]) <= OUTBOX_MAX_AGE_SECONDS
+        )
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
 
@@ -160,8 +161,10 @@ def load_outbox() -> list:
 
 def _save_outbox(entries: list) -> None:
     if len(entries) > OUTBOX_LIMIT:
-        log.warning("Очередь оповещений переполнена: самые старые %s сообщений отброшены",
-                    len(entries) - OUTBOX_LIMIT)
+        log.warning(
+            "Очередь оповещений переполнена: самые старые %s сообщений отброшены",
+            len(entries) - OUTBOX_LIMIT,
+        )
         entries = entries[-OUTBOX_LIMIT:]
     try:
         if not entries:
@@ -170,8 +173,7 @@ def _save_outbox(entries: list) -> None:
             return
         OUTBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary = OUTBOX_FILE.with_suffix(".tmp")
-        temporary.write_text(json.dumps(entries, ensure_ascii=False, indent=1),
-                             encoding="utf-8")
+        temporary.write_text(json.dumps(entries, ensure_ascii=False, indent=1), encoding="utf-8")
         temporary.replace(OUTBOX_FILE)
     except OSError as exc:
         log.warning("Очередь оповещений не сохранена: %s", type(exc).__name__)
@@ -182,16 +184,23 @@ def _post(entry: dict, opener: Callable) -> str:
     late = _clock() - float(entry["created"]) > LATE_AFTER_SECONDS
     if late:
         text = "⏳ Задержано: должно было прийти {}\n{}".format(
-            time.strftime("%d.%m в %H:%M", time.localtime(float(entry["created"]))), text)
-    data = urllib.parse.urlencode({"chat_id": config.TELEGRAM_CHAT_ID, "text": text,
-                                   "disable_web_page_preview": "true"}).encode("utf-8")
+            time.strftime("%d.%m в %H:%M", time.localtime(float(entry["created"]))), text
+        )
+    data = urllib.parse.urlencode(
+        {"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": "true"}
+    ).encode("utf-8")
     request = urllib.request.Request(
         TELEGRAM_URL.format(token=config.TELEGRAM_BOT_TOKEN, method="sendMessage"),
-        data=data, method="POST")
+        data=data,
+        method="POST",
+    )
     result = _request(request, opener)
     if result == SENT:
-        log.info("%s в Telegram: %s", "Доставлено задержанное сообщение" if late
-                 else "Сообщение отправлено", entry["text"].splitlines()[0])
+        log.info(
+            "%s в Telegram: %s",
+            "Доставлено задержанное сообщение" if late else "Сообщение отправлено",
+            entry["text"].splitlines()[0],
+        )
     return result
 
 
@@ -211,9 +220,13 @@ def _deliver(pending: list, opener: Callable) -> tuple:
     return [], delivered
 
 
-def send_telegram(text: str, opener: Callable = urllib.request.urlopen,
-                  retry_delays: Sequence[float] = (), sleep: Callable = time.sleep,
-                  queue: bool = True) -> bool:
+def send_telegram(
+    text: str,
+    opener: Callable = urllib.request.urlopen,
+    retry_delays: Sequence[float] = (),
+    sleep: Callable = time.sleep,
+    queue: bool = True,
+) -> bool:
     """Сообщение в чат TELEGRAM_CHAT_ID, а перед ним - задержанные из очереди.
 
     :param retry_delays: паузы перед повторами, если нет связи; пусто - одна попытка.
@@ -225,7 +238,7 @@ def send_telegram(text: str, opener: Callable = urllib.request.urlopen,
         return False
     text = redact(text)
     if len(text) > MAX_MESSAGE_CHARS:
-        text = text[:MAX_MESSAGE_CHARS - 1] + "…"
+        text = text[: MAX_MESSAGE_CHARS - 1] + "…"
     entry = {"created": _clock(), "text": text}
     pending = load_outbox() + [entry]
     if queue:
@@ -244,15 +257,21 @@ def send_telegram(text: str, opener: Callable = urllib.request.urlopen,
     if not queue:
         pending = [item for item in pending if item is not entry]
     if pending:
-        log.warning("Telegram недоступен: в очереди %s сообщ., уйдут со следующим оповещением",
-                    len(pending))
+        log.warning(
+            "Telegram недоступен: в очереди %s сообщ., уйдут со следующим оповещением", len(pending)
+        )
     _save_outbox(pending)
     return any(item is entry for item in delivered)
 
 
-def _send(headline: str, details: Details, footer: str = "",
-          opener: Callable = urllib.request.urlopen, final: bool = False,
-          sleep: Callable = time.sleep) -> None:
+def _send(
+    headline: str,
+    details: Details,
+    footer: str = "",
+    opener: Callable = urllib.request.urlopen,
+    final: bool = False,
+    sleep: Callable = time.sleep,
+) -> None:
     """Сообщение из заголовка и подробностей; details вызывается, только если
     Telegram настроен, - иначе прогон не ходит в базу ради несуществующего письма.
 
@@ -266,8 +285,9 @@ def _send(headline: str, details: Details, footer: str = "",
         lines.append(extra)
     if footer:
         lines.append(footer)
-    send_telegram("\n".join(lines), opener,
-                  retry_delays=FINAL_RETRY_DELAYS if final else (), sleep=sleep)
+    send_telegram(
+        "\n".join(lines), opener, retry_delays=FINAL_RETRY_DELAYS if final else (), sleep=sleep
+    )
 
 
 def ping(ok: bool, opener: Callable = urllib.request.urlopen) -> bool:
@@ -282,22 +302,22 @@ def ping(ok: bool, opener: Callable = urllib.request.urlopen) -> bool:
     return _request(request, opener) == SENT
 
 
-def job_problems(parse_code: int, backup_ok: Optional[bool]) -> list:
+def job_problems(parse_code: int, backup_ok: bool | None) -> list:
     """Что пошло не так в ежедневном прогоне; пустой список - всё в порядке.
 
     :param backup_ok: None - копия не снималась (выключена в config.yaml).
     """
     problems = []
     if parse_code != 0:
-        problems.append(EXIT_MEANINGS.get(
-            parse_code, "шаг parse завершился с кодом {}".format(parse_code)))
+        problems.append(
+            EXIT_MEANINGS.get(parse_code, "шаг parse завершился с кодом {}".format(parse_code))
+        )
     if backup_ok is False:
         problems.append("резервная копия базы не создана")
     return problems
 
 
-def report_start(details: Details = _no_details,
-                 opener: Callable = urllib.request.urlopen) -> None:
+def report_start(details: Details = _no_details, opener: Callable = urllib.request.urlopen) -> None:
     """Начало ежедневного сбора. Не ждёт сети: прогон не откладывается ради
     сообщения, не ушедшее уйдёт вместе со следующим.
 
@@ -306,16 +326,30 @@ def report_start(details: Details = _no_details,
     _send("▶️ {}: начался ежедневный сбор".format(TITLE), details, opener=opener)
 
 
-def report_retry(retry_at: str, attempt: int, attempts: int, details: Details = _no_details,
-                 opener: Callable = urllib.request.urlopen) -> None:
+def report_retry(
+    retry_at: str,
+    attempt: int,
+    attempts: int,
+    details: Details = _no_details,
+    opener: Callable = urllib.request.urlopen,
+) -> None:
     """Ozon остановил прогон, повтор по недостающим SKU назначен на retry_at."""
-    _send("⚠️ {}: {}. Повтор {} из {} в {} - только несобранные SKU".format(
-        TITLE, EXIT_MEANINGS[EXIT_BLOCKED], attempt, attempts, retry_at), details,
-        opener=opener)
+    _send(
+        "⚠️ {}: {}. Повтор {} из {} в {} - только несобранные SKU".format(
+            TITLE, EXIT_MEANINGS[EXIT_BLOCKED], attempt, attempts, retry_at
+        ),
+        details,
+        opener=opener,
+    )
 
 
-def report_job(parse_code: int, backup_ok: Optional[bool], summary: Details = _no_details,
-               opener: Callable = urllib.request.urlopen, sleep: Callable = time.sleep) -> None:
+def report_job(
+    parse_code: int,
+    backup_ok: bool | None,
+    summary: Details = _no_details,
+    opener: Callable = urllib.request.urlopen,
+    sleep: Callable = time.sleep,
+) -> None:
     """Итог ежедневного прогона: пульс и сообщение в Telegram.
 
     :param summary: итог дня из базы; вызывается, только если сообщение уходит.
@@ -323,9 +357,14 @@ def report_job(parse_code: int, backup_ok: Optional[bool], summary: Details = _n
     problems = job_problems(parse_code, backup_ok)
     ping(not problems, opener)
     if problems:
-        _send("❌ {}: {}".format(TITLE, "; ".join(problems)), summary,
-              footer="Подробности: python -m price_panel runs, logs/scheduler.log",
-              opener=opener, final=True, sleep=sleep)
+        _send(
+            "❌ {}: {}".format(TITLE, "; ".join(problems)),
+            summary,
+            footer="Подробности: python -m price_panel runs, logs/scheduler.log",
+            opener=opener,
+            final=True,
+            sleep=sleep,
+        )
         return
 
     def details() -> str:
@@ -334,19 +373,31 @@ def report_job(parse_code: int, backup_ok: Optional[bool], summary: Details = _n
             lines.append("Резервная копия базы создана")
         return "\n".join(line for line in lines if line)
 
-    _send("✅ {}: ежедневный сбор завершён".format(TITLE), details, opener=opener,
-          final=True, sleep=sleep)
+    _send(
+        "✅ {}: ежедневный сбор завершён".format(TITLE),
+        details,
+        opener=opener,
+        final=True,
+        sleep=sleep,
+    )
 
 
-def report_failure(problem: str, opener: Callable = urllib.request.urlopen,
-                   sleep: Callable = time.sleep) -> None:
+def report_failure(
+    problem: str, opener: Callable = urllib.request.urlopen, sleep: Callable = time.sleep
+) -> None:
     """Ежедневный сбор не начался (база недоступна, ошибка в config.yaml)."""
     ping(False, opener)
-    _send("❌ {}: ежедневный сбор не начался".format(TITLE), lambda: problem,
-          footer="Подробности: logs/pipeline.log", opener=opener, final=True, sleep=sleep)
+    _send(
+        "❌ {}: ежедневный сбор не начался".format(TITLE),
+        lambda: problem,
+        footer="Подробности: logs/pipeline.log",
+        opener=opener,
+        final=True,
+        sleep=sleep,
+    )
 
 
-def find_chats(opener: Callable = urllib.request.urlopen) -> Optional[list]:
+def find_chats(opener: Callable = urllib.request.urlopen) -> list | None:
     """Чаты, которые недавно писали боту: [(chat_id, название)].
 
     Нужен, чтобы узнать TELEGRAM_CHAT_ID: Telegram отдаёт обновления бота за
@@ -371,8 +422,10 @@ def find_chats(opener: Callable = urllib.request.urlopen) -> Optional[list]:
         for key in ("message", "edited_message", "channel_post", "my_chat_member"):
             chat = (update.get(key) or {}).get("chat")
             if chat and "id" in chat:
-                name = (chat.get("title") or chat.get("username")
-                        or " ".join(filter(None, [chat.get("first_name"),
-                                                  chat.get("last_name")])))
+                name = (
+                    chat.get("title")
+                    or chat.get("username")
+                    or " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")]))
+                )
                 chats[str(chat["id"])] = name or chat.get("type", "")
     return list(chats.items())

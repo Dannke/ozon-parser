@@ -102,4 +102,3 @@ def test_unknown_backend_falls_back_to_csv():
     """Опечатка в STORAGE не должна тихо превращаться в успешную проверку."""
     with csv_snapshot([]):
         assert check.run(dt.date.today(), "mysql", min_rows=1) == FAILED
-

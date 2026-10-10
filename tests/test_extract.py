@@ -63,12 +63,17 @@ FIXTURE = {
                     {
                         "title": "Общие",
                         "short": [
-                            {"key": "Color", "name": "Цвет товара",
-                             "values": [{"text": "серый"}]},
-                            {"key": "Material", "name": "Материал обивки",
-                             "values": [{"text": "экокожа"}]},
-                            {"key": "PartNumber", "name": "Артикул производителя",
-                             "values": [{"text": "CH-545-GREY"}]},
+                            {"key": "Color", "name": "Цвет товара", "values": [{"text": "серый"}]},
+                            {
+                                "key": "Material",
+                                "name": "Материал обивки",
+                                "values": [{"text": "экокожа"}],
+                            },
+                            {
+                                "key": "PartNumber",
+                                "name": "Артикул производителя",
+                                "values": [{"text": "CH-545-GREY"}],
+                            },
                         ],
                     }
                 ]
@@ -79,8 +84,10 @@ FIXTURE = {
             {
                 "richAnnotationJson": {
                     "content": [
-                        {"widgetName": "raPicture",
-                         "img": {"src": "https://cdn1.ozone.ru/s3/rich/block-1.jpg"}},
+                        {
+                            "widgetName": "raPicture",
+                            "img": {"src": "https://cdn1.ozone.ru/s3/rich/block-1.jpg"},
+                        },
                         {"widgetName": "raTextBlock", "text": "Удобное кресло"},
                     ]
                 }
@@ -93,8 +100,9 @@ FIXTURE = {
 # Карточка без rich-описания, без видео и с другой формой виджета рейтинга.
 FIXTURE_MINIMAL = {
     "widgetStates": {
-        "webProductHeading-1-default-1": json.dumps({"title": "Ручка шариковая"},
-                                                    ensure_ascii=False),
+        "webProductHeading-1-default-1": json.dumps(
+            {"title": "Ручка шариковая"}, ensure_ascii=False
+        ),
         "webSale-2-default-1": json.dumps({"price": "59 ₽"}, ensure_ascii=False),
         "webSingleProductScore-3-default-1": json.dumps({"score": 4.2, "reviewsCount": 7}),
         "webGallery-4-default-1": json.dumps(
@@ -144,11 +152,13 @@ def test_characteristic_traps_from_live_cards():
     page = {
         "widgetStates": {
             "webCharacteristics-1-default-1": json.dumps(
-                {"characteristics": [
-                    {"name": "Количество цветов", "values": [{"text": "24"}]},
-                    {"name": "Артикул", "values": [{"text": "2359066702"}]},
-                    {"name": "Состав комплекта", "values": [{"text": "Раскраска, кисть"}]},
-                ]},
+                {
+                    "characteristics": [
+                        {"name": "Количество цветов", "values": [{"text": "24"}]},
+                        {"name": "Артикул", "values": [{"text": "2359066702"}]},
+                        {"name": "Состав комплекта", "values": [{"text": "Раскраска, кисть"}]},
+                    ]
+                },
                 ensure_ascii=False,
             )
         }
@@ -158,9 +168,14 @@ def test_characteristic_traps_from_live_cards():
     assert product["material"] is None
     assert product["art_set"] == "Раскраска, кисть"
 
-    only_sku = {"widgetStates": {"webCharacteristics-1-default-1": json.dumps(
-        {"characteristics": [{"name": "Артикул", "values": [{"text": "2359066702"}]}]},
-        ensure_ascii=False)}}
+    only_sku = {
+        "widgetStates": {
+            "webCharacteristics-1-default-1": json.dumps(
+                {"characteristics": [{"name": "Артикул", "values": [{"text": "2359066702"}]}]},
+                ensure_ascii=False,
+            )
+        }
+    }
     assert parse_product(only_sku, "2359066702")["art_set"] is None
 
 
@@ -300,16 +315,25 @@ def test_price_prefers_actual_widget_over_out_of_stock():
     assert parse_product(page, "1")["price"] == 5990.0
 
     # Если актуального виджета нет, цена всё же берётся из запасного.
-    only_sale = {"widgetStates": {
-        "webSale-1-default-1": json.dumps({"price": "7 490 ₽"}, ensure_ascii=False)}}
+    only_sale = {
+        "widgetStates": {
+            "webSale-1-default-1": json.dumps({"price": "7 490 ₽"}, ensure_ascii=False)
+        }
+    }
     assert parse_product(only_sale, "1")["price"] == 7490.0
 
 
 def test_rich_content_ignores_link_tag():
     """<link> не должен приниматься за <li>: маркеры ищутся по границе тега."""
+
     def described(html):
-        page = {"widgetStates": {"webDescription-1-default-1": json.dumps(
-            {"richAnnotationType": "HTML", "richAnnotation": html}, ensure_ascii=False)}}
+        page = {
+            "widgetStates": {
+                "webDescription-1-default-1": json.dumps(
+                    {"richAnnotationType": "HTML", "richAnnotation": html}, ensure_ascii=False
+                )
+            }
+        }
         return parse_product(page, "1")["has_rich_content"]
 
     assert described("<p>Обычный текст</p><link rel='stylesheet'>") is False
@@ -327,13 +351,15 @@ def card_html(states: dict, json_ld=None) -> str:
     """
     divs = "".join(
         "<div id=\"state-{}\" data-state='{}'></div>".format(
-            key, html.escape(json.dumps(value, ensure_ascii=False), quote=True))
+            key, html.escape(json.dumps(value, ensure_ascii=False), quote=True)
+        )
         for key, value in states.items()
     )
     script = ""
     if json_ld is not None:
         script = '<script type="application/ld+json">{}</script>'.format(
-            json.dumps(json_ld, ensure_ascii=False))
+            json.dumps(json_ld, ensure_ascii=False)
+        )
     return "<html><head>{}</head><body>{}</body></html>".format(script, divs)
 
 
@@ -355,7 +381,7 @@ def test_embedded_widget_states_are_parsed_like_api():
 
 def test_embedded_state_survives_quotes_and_markup():
     """Кавычки и теги внутри значений не ломают разбор атрибута."""
-    title = "Кресло \"Босс\" <серое> & мягкое"
+    title = 'Кресло "Босс" <серое> & мягкое'
     page_json = embedded_page_json(card_html({"webProductHeading-1-default-1": {"title": title}}))
     product = parse_product(page_json, "1")
     assert product["title"] == title
@@ -369,8 +395,11 @@ def test_json_ld_fills_missing_fields():
         "name": "Раскраска по номерам",
         "image": "https://ir.ozone.ru/s3/cover.jpg",
         "offers": {"@type": "Offer", "price": "1672", "priceCurrency": "RUB"},
-        "aggregateRating": {"@type": "AggregateRating", "ratingValue": "4.9",
-                            "reviewCount": "1628"},
+        "aggregateRating": {
+            "@type": "AggregateRating",
+            "ratingValue": "4.9",
+            "reviewCount": "1628",
+        },
     }
     product = parse_html(card_html({}, json_ld), "2359066702")
     assert product["title"] == "Раскраска по номерам"
@@ -383,8 +412,10 @@ def test_json_ld_fills_missing_fields():
 def test_widgets_take_priority_over_json_ld():
     """JSON-LD только дополняет: данные виджетов точнее и не перезаписываются."""
     json_ld = {"@type": "Product", "name": "SEO-название", "offers": {"price": "1"}}
-    states = {"webProductHeading-1-default-1": {"title": "Название из виджета"},
-              "webPrice-2-default-1": {"price": "5 990 ₽"}}
+    states = {
+        "webProductHeading-1-default-1": {"title": "Название из виджета"},
+        "webPrice-2-default-1": {"price": "5 990 ₽"},
+    }
     product = parse_html(card_html(states, json_ld), "1")
     assert product["title"] == "Название из виджета"
     assert product["price"] == 5990.0

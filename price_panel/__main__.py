@@ -40,8 +40,11 @@ def _warehouse() -> Warehouse:
 def cmd_migrate(args, settings: Settings) -> int:
     with Warehouse() as wh:
         applied = wh.migrate()
-    print("Миграции применены: {}".format(", ".join(applied)) if applied
-          else "Схема актуальна, новых миграций нет")
+    print(
+        "Миграции применены: {}".format(", ".join(applied))
+        if applied
+        else "Схема актуальна, новых миграций нет"
+    )
     return 0
 
 
@@ -77,13 +80,22 @@ def cmd_discover(args, settings: Settings) -> int:
                 continue
             if result.status == "blocked":
                 print("  STOPPED:    Ozon ограничил запросы, найденное сохранено")
-            depth = (" (выдача кончается на странице {})".format(result.listing_depth)
-                     if result.listing_depth else "")
+            depth = (
+                " (выдача кончается на странице {})".format(result.listing_depth)
+                if result.listing_depth
+                else ""
+            )
             print("  requests:   {}{}".format(result.pages_requested, depth))
-            print("  discovered: {} уникальных SKU ({} уже в panel)".format(
-                result.discovered, result.already_in_panel))
-            print("  selected:   {} (top {} + tail_random {})".format(
-                result.selected, result.selected_top, result.selected_tail))
+            print(
+                "  discovered: {} уникальных SKU ({} уже в panel)".format(
+                    result.discovered, result.already_in_panel
+                )
+            )
+            print(
+                "  selected:   {} (top {} + tail_random {})".format(
+                    result.selected, result.selected_top, result.selected_tail
+                )
+            )
             if result.note:
                 print("  note:       {}".format(result.note))
 
@@ -91,9 +103,12 @@ def cmd_discover(args, settings: Settings) -> int:
         print("\nTotal selected SKU: {}".format(sum(r.selected for r in results)))
         exported = discovery.export_panel(wh, settings)
         if unfinished:
-            print("Panel saved, но не собраны до panel_size: {}. Запустите discover "
-                  "повторно - готовые категории он пропустит.".format(
-                      ", ".join(r.category.name for r in unfinished)))
+            print(
+                "Panel saved, но не собраны до panel_size: {}. Запустите discover "
+                "повторно - готовые категории он пропустит.".format(
+                    ", ".join(r.category.name for r in unfinished)
+                )
+            )
         else:
             print("Panel saved successfully")
         if exported is not None:
@@ -114,7 +129,7 @@ def cmd_panel(args, settings: Settings) -> int:
 
 def _today_start(settings: Settings) -> dt.datetime:
     tz = scheduler.get_timezone(settings.schedule.timezone)
-    return scheduler.day_start(dt.datetime.now(dt.timezone.utc), tz)
+    return scheduler.day_start(dt.datetime.now(dt.UTC), tz)
 
 
 def _skus_for_parse(args, wh: Warehouse, settings: Settings) -> tuple:
@@ -142,8 +157,7 @@ def cmd_parse(args, settings: Settings) -> int:
             print("Все SKU panel за сегодня уже собраны")
             return 0
         if not skus:
-            log.error("Нет SKU для парсинга (%s). Сначала: python -m price_panel discover",
-                      source)
+            log.error("Нет SKU для парсинга (%s). Сначала: python -m price_panel discover", source)
             return 1
         report = pipeline.run_parse(wh, skus, settings, kind=args.kind, sku_source=source)
         print(pipeline.format_report(report))
@@ -155,6 +169,7 @@ def cmd_benchmark(args, settings: Settings) -> int:
     with _warehouse() as wh:
         if args.file:
             from .parse import read_skus_file
+
             skus, source = read_skus_file(args.file)[:size], "file"
         else:
             skus, source = pipeline.sample_panel(wh, size, args.seed), "panel"
@@ -172,19 +187,39 @@ def cmd_runs(args, settings: Settings) -> int:
     with _warehouse() as wh:
         rows = wh.recent_runs(args.limit)
         print("Время - {}".format(settings.schedule.timezone))
-        print("{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
-            "run", "kind", "status", "started", "total", "ok", "err", "duration", "SKU/min",
-            "s/SKU"))
-        for (run_id, kind, status, started, total, ok, err, duration, speed, avg,
-             _delay) in rows:
-            print("{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
-                run_id, kind, status, started.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
-                total, ok, err,
-                pipeline.format_duration(float(duration)) if duration is not None else "-",
-                speed if speed is not None else "-", avg if avg is not None else "-"))
+        print(
+            "{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
+                "run",
+                "kind",
+                "status",
+                "started",
+                "total",
+                "ok",
+                "err",
+                "duration",
+                "SKU/min",
+                "s/SKU",
+            )
+        )
+        for run_id, kind, status, started, total, ok, err, duration, speed, avg, _delay in rows:
+            print(
+                "{:>6} {:<9} {:<11} {:<16} {:>6} {:>6} {:>6} {:>9} {:>8} {:>7}".format(
+                    run_id,
+                    kind,
+                    status,
+                    started.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+                    total,
+                    ok,
+                    err,
+                    pipeline.format_duration(float(duration)) if duration is not None else "-",
+                    speed if speed is not None else "-",
+                    avg if avg is not None else "-",
+                )
+            )
         observations, skus, runs = wh.history_counts()
-        print("\nprice_history: {} наблюдений, {} SKU, {} прогонов".format(
-            observations, skus, runs))
+        print(
+            "\nprice_history: {} наблюдений, {} SKU, {} прогонов".format(observations, skus, runs)
+        )
     return 0
 
 
@@ -209,8 +244,10 @@ def cmd_schedule(args, settings: Settings) -> int:
 def cmd_notify(args, settings: Settings) -> int:
     # База не нужна: команда проверяет только настройки Telegram в .env.
     if not config.TELEGRAM_BOT_TOKEN:
-        print("TELEGRAM_BOT_TOKEN не задан в .env: токен выдаёт @BotFather "
-              "(docs/operations.md, «Оповещения»)")
+        print(
+            "TELEGRAM_BOT_TOKEN не задан в .env: токен выдаёт @BotFather "
+            "(docs/operations.md, «Оповещения»)"
+        )
         return 1
     if not config.TELEGRAM_CHAT_ID:
         chats = notify.find_chats()
@@ -227,8 +264,7 @@ def cmd_notify(args, settings: Settings) -> int:
     # Задержанные из-за сети сообщения уходят перед проверочным; само оно в
     # очередь не встаёт - результат виден сразу.
     queued = len(notify.load_outbox())
-    if not notify.send_telegram("✅ Price panel: оповещения настроены, бот на связи",
-                                queue=False):
+    if not notify.send_telegram("✅ Price panel: оповещения настроены, бот на связи", queue=False):
         print("Сообщение не отправлено - причина в logs/notify.log")
         left = len(notify.load_outbox())
         if left:
@@ -242,18 +278,25 @@ def cmd_notify(args, settings: Settings) -> int:
 
 # ------------------------------------------------------------------ разбор --
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m price_panel",
-                                     description="Конвейер discovery -> panel -> parse")
+    parser = argparse.ArgumentParser(
+        prog="python -m price_panel", description="Конвейер discovery -> panel -> parse"
+    )
     parser.add_argument("--config", type=Path, help="путь к config.yaml (или PIPELINE_CONFIG)")
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("migrate", help="применить миграции схемы").set_defaults(func=cmd_migrate)
 
     discover = commands.add_parser("discover", help="найти SKU и сформировать panel")
-    discover.add_argument("--category", action="append",
-                          help="только эта категория из config.yaml (можно несколько раз)")
-    discover.add_argument("--rebuild", action="store_true",
-                          help="пересобрать panel категории заново (старая выключается)")
+    discover.add_argument(
+        "--category",
+        action="append",
+        help="только эта категория из config.yaml (можно несколько раз)",
+    )
+    discover.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="пересобрать panel категории заново (старая выключается)",
+    )
     discover.set_defaults(func=cmd_discover)
 
     panel = commands.add_parser("panel", help="состав panel")
@@ -265,11 +308,18 @@ def build_parser() -> argparse.ArgumentParser:
     parse.add_argument("--file", type=Path, help="файл со списком SKU вместо panel")
     parse.add_argument("--category", action="append", help="только SKU этой категории panel")
     parse.add_argument("--limit", type=int, help="обработать не больше N SKU")
-    parse.add_argument("--kind", choices=["manual", "daily"], default="manual",
-                       help="тип прогона в parse_runs (планировщик передаёт daily)")
-    parse.add_argument("--missing-today", action="store_true",
-                       help="только SKU panel, у которых за сегодня (schedule.timezone) ещё "
-                            "нет успешного наблюдения - догон после блокировки")
+    parse.add_argument(
+        "--kind",
+        choices=["manual", "daily"],
+        default="manual",
+        help="тип прогона в parse_runs (планировщик передаёт daily)",
+    )
+    parse.add_argument(
+        "--missing-today",
+        action="store_true",
+        help="только SKU panel, у которых за сегодня (schedule.timezone) ещё "
+        "нет успешного наблюдения - догон после блокировки",
+    )
     parse.set_defaults(func=cmd_parse)
 
     bench = commands.add_parser("benchmark", help="замер скорости парсера")
@@ -282,15 +332,17 @@ def build_parser() -> argparse.ArgumentParser:
     runs.add_argument("--limit", type=int, default=10)
     runs.set_defaults(func=cmd_runs)
 
-    commands.add_parser("backup", help="резервная копия базы (backup в config.yaml)"
-                        ).set_defaults(func=cmd_backup)
+    commands.add_parser("backup", help="резервная копия базы (backup в config.yaml)").set_defaults(
+        func=cmd_backup
+    )
 
     schedule = commands.add_parser("schedule", help="ежедневный запуск")
     schedule.add_argument("--once", action="store_true", help="выполнить прогон сейчас и выйти")
     schedule.set_defaults(func=cmd_schedule)
 
-    commands.add_parser("notify", help="проверить Telegram-бота: тестовое сообщение или id чата"
-                        ).set_defaults(func=cmd_notify)
+    commands.add_parser(
+        "notify", help="проверить Telegram-бота: тестовое сообщение или id чата"
+    ).set_defaults(func=cmd_notify)
     return parser
 
 

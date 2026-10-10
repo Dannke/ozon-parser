@@ -19,8 +19,7 @@ from price_panel.gmail import GmailCodeReader, GmailError, GmailSettings
 
 def write_session(path: Path, names=("__Secure-access-token",), age_days: float = 0) -> Path:
     """Пишет правдоподобный cookies.json заданного возраста."""
-    payload = {"cookies": [{"name": name, "value": "x", "domain": ".ozon.ru"}
-                           for name in names]}
+    payload = {"cookies": [{"name": name, "value": "x", "domain": ".ozon.ru"} for name in names]}
     path.write_text(json.dumps(payload), encoding="utf-8")
     if age_days:
         stamp = time.time() - age_days * 86400
@@ -34,12 +33,15 @@ def test_fresh_session_needs_no_login(tmp_path):
     assert session.is_logged_in(path)
 
 
-@pytest.mark.parametrize("prepare, expected", [
-    (lambda path: None, "не найден"),
-    (lambda path: path.write_text("{не json", encoding="utf-8"), "повреждён"),
-    (lambda path: write_session(path, names=("some-analytics-cookie",)), "нет токенов"),
-    (lambda path: write_session(path, age_days=20), "лимит 14"),
-])
+@pytest.mark.parametrize(
+    "prepare, expected",
+    [
+        (lambda path: None, "не найден"),
+        (lambda path: path.write_text("{не json", encoding="utf-8"), "повреждён"),
+        (lambda path: write_session(path, names=("some-analytics-cookie",)), "нет токенов"),
+        (lambda path: write_session(path, age_days=20), "лимит 14"),
+    ],
+)
 def test_broken_or_stale_session_needs_login(tmp_path, prepare, expected):
     """Нет файла, битый JSON, нет токенов, файл старше лимита - всё это повод войти."""
     path = tmp_path / "cookies.json"
@@ -84,10 +86,12 @@ def test_manual_login_is_refused_in_background(tmp_path, monkeypatch):
 
 def test_gmail_consent_is_not_opened_in_background(tmp_path):
     """Без действующего token.json фоновый запуск падает сразу с подсказкой."""
-    reader = GmailCodeReader(GmailSettings(
-        credentials_file=tmp_path / "credentials.json",
-        token_file=tmp_path / "token.json",
-        interactive=False,
-    ))
+    reader = GmailCodeReader(
+        GmailSettings(
+            credentials_file=tmp_path / "credentials.json",
+            token_file=tmp_path / "token.json",
+            interactive=False,
+        )
+    )
     with pytest.raises(GmailError, match="token.json"):
         reader.connect()

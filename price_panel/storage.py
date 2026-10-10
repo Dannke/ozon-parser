@@ -25,7 +25,6 @@ import datetime as dt
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional
 
 from . import config, db
 from .extract import FIELDS
@@ -134,8 +133,9 @@ ON CONFLICT (sku, parsed_date) DO UPDATE SET
 """
 
 
-def save_postgres(rows: Sequence[dict], dsn: str, table: str,
-                  snapshot_date: Optional[dt.date] = None) -> None:
+def save_postgres(
+    rows: Sequence[dict], dsn: str, table: str, snapshot_date: dt.date | None = None
+) -> None:
     """Создаёт таблицу при необходимости и заливает срез за указанную дату."""
     if not rows:
         log.warning("Нечего сохранять: список товаров пуст")
@@ -182,8 +182,7 @@ ORDER BY (sku, parsed_date)
 """
 
 
-def save_clickhouse(rows: Sequence[dict], table: str,
-                    snapshot_date: Optional[dt.date] = None) -> None:
+def save_clickhouse(rows: Sequence[dict], table: str, snapshot_date: dt.date | None = None) -> None:
     """Создаёт таблицу ReplacingMergeTree и вставляет срез за указанную дату."""
     if not rows:
         log.warning("Нечего сохранять: список товаров пуст")
@@ -196,8 +195,10 @@ def save_clickhouse(rows: Sequence[dict], table: str,
         return None if value is None else int(bool(value))
 
     data = [
-        [to_uint8(value) if DB_FIELDS[index] == "has_rich_content" else value
-         for index, value in enumerate(row)]
+        [
+            to_uint8(value) if DB_FIELDS[index] == "has_rich_content" else value
+            for index, value in enumerate(row)
+        ]
         for row in _db_rows(rows, snapshot_date)
     ]
 
@@ -213,8 +214,12 @@ def save_clickhouse(rows: Sequence[dict], table: str,
 
 
 # ------------------------------------------------------------------ фасад ---
-def save(rows: Sequence[dict], backend: str = "", csv_path: Optional[Path] = None,
-         snapshot_date: Optional[dt.date] = None) -> None:
+def save(
+    rows: Sequence[dict],
+    backend: str = "",
+    csv_path: Path | None = None,
+    snapshot_date: dt.date | None = None,
+) -> None:
     """Сохраняет результаты выбранным бэкендом.
 
     Порядок важен: сначала БД, потом CSV. База - источник истины для витрин,
@@ -238,7 +243,7 @@ def save(rows: Sequence[dict], backend: str = "", csv_path: Optional[Path] = Non
     if backend == "none":
         return
 
-    db_error: Optional[StorageError] = None
+    db_error: StorageError | None = None
     try:
         if backend == "postgres":
             save_postgres(rows, config.PG_DSN, config.PG_TABLE, snapshot_date)

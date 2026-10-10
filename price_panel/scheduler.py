@@ -30,7 +30,7 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Callable
+from collections.abc import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import backup, config, notify
@@ -72,7 +72,7 @@ def get_timezone(name: str) -> dt.tzinfo:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
         log.warning("Часовой пояс %r не найден (нет пакета tzdata?) - использую UTC", name)
-        return dt.timezone.utc
+        return dt.UTC
 
 
 def next_run_at(now: dt.datetime, daily_at: dt.time, tz: dt.tzinfo) -> dt.datetime:
@@ -80,8 +80,9 @@ def next_run_at(now: dt.datetime, daily_at: dt.time, tz: dt.tzinfo) -> dt.dateti
     local_now = now.astimezone(tz)
     candidate = dt.datetime.combine(local_now.date(), daily_at, tzinfo=tz)
     if candidate <= local_now:
-        candidate = dt.datetime.combine(local_now.date() + dt.timedelta(days=1), daily_at,
-                                        tzinfo=tz)
+        candidate = dt.datetime.combine(
+            local_now.date() + dt.timedelta(days=1), daily_at, tzinfo=tz
+        )
     return candidate
 
 
@@ -95,11 +96,21 @@ def job_commands(settings: Settings) -> list:
     python = sys.executable
     steps = []
     if settings.schedule.ensure_session:
-        steps.append(("ensure_session", [
-            python, str(config.BASE_DIR / "get_cookies.py"), "--non-interactive",
-            "--max-age-days", str(settings.schedule.session_max_age_days)]))
-    steps.append(("parse", [python, "-m", "price_panel", "parse", "--kind", "daily",
-                            "--missing-today"]))
+        steps.append(
+            (
+                "ensure_session",
+                [
+                    python,
+                    str(config.BASE_DIR / "get_cookies.py"),
+                    "--non-interactive",
+                    "--max-age-days",
+                    str(settings.schedule.session_max_age_days),
+                ],
+            )
+        )
+    steps.append(
+        ("parse", [python, "-m", "price_panel", "parse", "--kind", "daily", "--missing-today"])
+    )
     return steps
 
 
@@ -122,8 +133,9 @@ def _run_step(name: str, command: list, timeout: float, limit: Callable[[], str]
     log.info("Шаг %s: %s", name, " ".join(command[1:]))
     started = time.monotonic()
     try:
-        code = subprocess.run(command, cwd=str(config.BASE_DIR), timeout=timeout,
-                              check=False).returncode
+        code = subprocess.run(
+            command, cwd=str(config.BASE_DIR), timeout=timeout, check=False
+        ).returncode
     except subprocess.TimeoutExpired:
         log.error("Шаг %s не уложился в %s и остановлен", name, limit())
         code = 1
@@ -135,9 +147,12 @@ def _run_steps(settings: Settings, deadline: float, clock) -> int:
     """Шаги прогона по очереди. Возвращает код возврата шага parse."""
     code = 1
     for name, command in job_commands(settings):
-        code = _run_step(name, command, max(deadline - clock(), 1),
-                         lambda: "отведённое время (до {})".format(
-                             _clock_time(deadline, settings)))
+        code = _run_step(
+            name,
+            command,
+            max(deadline - clock(), 1),
+            lambda: "отведённое время (до {})".format(_clock_time(deadline, settings)),
+        )
         if name == "ensure_session" and code != 0:
             # Карточки ozon.ru открываются и без входа: прогон всё равно
             # запускаем, а проблема с сессией видна в логе и в parse_runs.
@@ -158,11 +173,19 @@ def wait_for_network(clock=time.time, sleep=time.sleep) -> bool:
             return True
         except OSError as exc:
             if clock() >= give_up:
-                log.error("Сети нет %s мин: %s не разрешается (%s) - запускаю прогон как есть",
-                          NETWORK_WAIT_SECONDS // 60, NETWORK_HOST, exc)
+                log.error(
+                    "Сети нет %s мин: %s не разрешается (%s) - запускаю прогон как есть",
+                    NETWORK_WAIT_SECONDS // 60,
+                    NETWORK_HOST,
+                    exc,
+                )
                 return False
-            log.warning("Сети нет: %s не разрешается (%s) - жду %s с",
-                        NETWORK_HOST, exc, NETWORK_POLL_SECONDS)
+            log.warning(
+                "Сети нет: %s не разрешается (%s) - жду %s с",
+                NETWORK_HOST,
+                exc,
+                NETWORK_POLL_SECONDS,
+            )
             sleep(NETWORK_POLL_SECONDS)
 
 
@@ -183,14 +206,24 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
             break
         retry_at = clock() + schedule.block_retry_delay_hours * 3600
         if deadline - retry_at < MIN_RETRY_WINDOW_SECONDS:
-            log.warning("Прогон остановлен блокировкой Ozon; на повтор не хватает времени "
-                        "(schedule.parse_timeout_hours=%s) - SKU доберёт следующий прогон",
-                        schedule.parse_timeout_hours)
+            log.warning(
+                "Прогон остановлен блокировкой Ozon; на повтор не хватает времени "
+                "(schedule.parse_timeout_hours=%s) - SKU доберёт следующий прогон",
+                schedule.parse_timeout_hours,
+            )
             break
-        log.warning("Прогон остановлен блокировкой Ozon - повтор %s из %s в %s",
-                    attempt, schedule.block_retries, _clock_time(retry_at, settings))
-        notify.report_retry(_clock_time(retry_at, settings), attempt, schedule.block_retries,
-                            details=lambda: day_progress(settings))
+        log.warning(
+            "Прогон остановлен блокировкой Ozon - повтор %s из %s в %s",
+            attempt,
+            schedule.block_retries,
+            _clock_time(retry_at, settings),
+        )
+        notify.report_retry(
+            _clock_time(retry_at, settings),
+            attempt,
+            schedule.block_retries,
+            details=lambda: day_progress(settings),
+        )
         _sleep_until(retry_at, clock, sleep)
         code = _run_steps(settings, deadline, clock)
 
@@ -202,9 +235,15 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
 
 def _run_backup() -> bool:
     """Шаг backup отдельным процессом, как остальные шаги. True - копия снята."""
-    return _run_step("backup", [sys.executable, "-m", "price_panel", "backup"],
-                     BACKUP_TIMEOUT_SECONDS,
-                     lambda: "{} с".format(BACKUP_TIMEOUT_SECONDS)) == 0
+    return (
+        _run_step(
+            "backup",
+            [sys.executable, "-m", "price_panel", "backup"],
+            BACKUP_TIMEOUT_SECONDS,
+            lambda: "{} с".format(BACKUP_TIMEOUT_SECONDS),
+        )
+        == 0
+    )
 
 
 # ------------------------------------------------------- тексты оповещений --
@@ -217,21 +256,23 @@ def format_run(row: tuple, error_counts: list) -> str:
     """Строка о прогоне из parse_runs (порядок полей - Warehouse.recent_runs)."""
     run_id, kind, status, _started, total, ok, errors, duration, speed = row[:9]
     text = "Прогон {} ({}): {}, успешно {} из {}, ошибок {}".format(
-        run_id, kind, status, ok, total, errors)
+        run_id, kind, status, ok, total, errors
+    )
     if duration is not None:
         text += ", {}".format(format_duration(float(duration)))
     if speed is not None:
         text += ", {} SKU/мин".format(speed)
     if error_counts:
         text += "\nОшибки: " + ", ".join(
-            "{} {}".format(error_type, count) for error_type, count in error_counts)
+            "{} {}".format(error_type, count) for error_type, count in error_counts
+        )
     return text
 
 
 def _read_db(settings: Settings, read: Callable[[Warehouse, dt.datetime], str]) -> str:
     """Текст для оповещения из базы; пусто, если база недоступна."""
     tz = get_timezone(settings.schedule.timezone)
-    since = day_start(dt.datetime.now(dt.timezone.utc), tz)
+    since = day_start(dt.datetime.now(dt.UTC), tz)
     try:
         with Warehouse() as wh:
             return read(wh, since)
@@ -247,6 +288,7 @@ def _progress(wh: Warehouse, since: dt.datetime) -> str:
 
 def start_details(settings: Settings) -> str:
     """Для оповещения о начале: сколько SKU panel осталось собрать за день."""
+
     def read(wh: Warehouse, since: dt.datetime) -> str:
         total = len(wh.active_panel_skus())
         if not total:
@@ -255,6 +297,7 @@ def start_details(settings: Settings) -> str:
         if not missing:
             return "Все {} SKU panel за сегодня уже собраны".format(total)
         return "К сбору {} из {} SKU panel".format(missing, total)
+
     return _read_db(settings, read)
 
 
@@ -270,13 +313,18 @@ def job_summary(settings: Settings) -> str:
     после него - не итог задачи, а если parse сегодня собирать было нечего,
     строки о прогоне нет вовсе.
     """
+
     def read(wh: Warehouse, since: dt.datetime) -> str:
         lines = [_progress(wh, since)]
-        daily = [row for row in wh.recent_runs(RECENT_RUNS_FOR_SUMMARY)
-                 if row[1] == "daily" and row[3] >= since]
+        daily = [
+            row
+            for row in wh.recent_runs(RECENT_RUNS_FOR_SUMMARY)
+            if row[1] == "daily" and row[3] >= since
+        ]
         if daily:
             lines.append(format_run(daily[0], wh.error_counts(daily[0][0])))
         return "\n".join(line for line in lines if line)
+
     return _read_db(settings, read)
 
 
@@ -286,15 +334,17 @@ def serve(settings: Settings, once: bool = False, clock=time.time) -> int:
         return run_job(settings)
 
     tz = get_timezone(settings.schedule.timezone)
-    log.info("Планировщик запущен: ежедневно в %s (%s)",
-             settings.schedule.daily_at.strftime("%H:%M"), settings.schedule.timezone)
+    log.info(
+        "Планировщик запущен: ежедневно в %s (%s)",
+        settings.schedule.daily_at.strftime("%H:%M"),
+        settings.schedule.timezone,
+    )
     if settings.schedule.run_on_start:
         run_job(settings)
 
     while True:
-        now = dt.datetime.fromtimestamp(clock(), dt.timezone.utc)
+        now = dt.datetime.fromtimestamp(clock(), dt.UTC)
         target = next_run_at(now, settings.schedule.daily_at, tz)
         log.info("Следующий прогон: %s", target.isoformat(timespec="minutes"))
         _sleep_until(target.timestamp(), clock, time.sleep)
         run_job(settings)
-

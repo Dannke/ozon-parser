@@ -66,9 +66,7 @@ def _import_psycopg2():
     try:
         import psycopg2
     except ImportError as exc:
-        raise DatabaseError(
-            'Не установлен драйвер PostgreSQL: pip install ".[postgres]"'
-        ) from exc
+        raise DatabaseError('Не установлен драйвер PostgreSQL: pip install ".[postgres]"') from exc
     return psycopg2
 
 

@@ -34,8 +34,10 @@ HTML_TYPE = "text/html; charset=utf-8"
 
 # Карточка со встроенным JSON - на неё переходит парсер, если API недоступен.
 STUB_PRODUCT_HTML = card_html(
-    {"webProductHeading-1-default-1": {"title": "Кресло из HTML"},
-     "webPrice-2-default-1": {"price": "9 990 ₽"}},
+    {
+        "webProductHeading-1-default-1": {"title": "Кресло из HTML"},
+        "webPrice-2-default-1": {"price": "9 990 ₽"},
+    },
 ).replace("<head>", "<head><title>stub</title>")
 
 # Антибот-заглушка, которая через секунду «проходит» сама, как у Ozon.
@@ -139,8 +141,10 @@ def browser():
         except Exception as exc:  # noqa: BLE001 - драйвер бросает разные классы
             _PLAYWRIGHT.stop()
             _PLAYWRIGHT = None
-            pytest.skip("браузер не запустился ({}). См. docs/installation.md: "
-                        "python -m playwright install chromium".format(exc))
+            pytest.skip(
+                "браузер не запустился ({}). См. docs/installation.md: "
+                "python -m playwright install chromium".format(exc)
+            )
         atexit.register(_shutdown)
     return _BROWSER
 
@@ -154,8 +158,11 @@ def make_route_handler(api_status: int = 200):
             if api_status != 200:
                 route.fulfill(status=api_status, content_type="application/json", body="{}")
             else:
-                route.fulfill(status=200, content_type="application/json",
-                              body=json.dumps(FIXTURE, ensure_ascii=False))
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(FIXTURE, ensure_ascii=False),
+                )
         elif "single-code" in url:
             route.fulfill(status=200, content_type=HTML_TYPE, body=STUB_SINGLE_CODE_HTML)
         elif "/qr" in url:
@@ -270,6 +277,8 @@ def test_source_marks_where_data_came_from():
     assert product["source"] == extract.SOURCE_HTML
     assert product["title"] == "Кресло из HTML"
     assert product["price"] == 9990.0
+
+
 def test_parse_sku_reads_fields_from_api():
     """Запрос к внутреннему API из контекста страницы и разбор ответа."""
     product = _parse("2359066702")
@@ -396,8 +405,9 @@ def test_endless_challenge_gives_up():
     """Проверка, которая не проходит, - отказ по таймауту, а не вечное ожидание."""
     with stub_context() as context:
         page = context.new_page()
-        response = page.goto("https://data.ozon.ru/endless-challenge",
-                             wait_until="domcontentloaded")
+        response = page.goto(
+            "https://data.ozon.ru/endless-challenge", wait_until="domcontentloaded"
+        )
         assert browser_utils.pass_challenge(page, response, timeout=2) is False
 
 
@@ -418,8 +428,17 @@ def test_save_session_writes_storage_state():
     with stub_context() as context:
         page = context.new_page()
         page.goto("https://www.ozon.ru/", wait_until="domcontentloaded")
-        context.add_cookies([{"name": "__Secure-access-token", "value": "x",
-                              "domain": ".ozon.ru", "path": "/", "secure": True}])
+        context.add_cookies(
+            [
+                {
+                    "name": "__Secure-access-token",
+                    "value": "x",
+                    "domain": ".ozon.ru",
+                    "path": "/",
+                    "secure": True,
+                }
+            ]
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cookies.json"
             session.save_session(context, path)
@@ -439,4 +458,3 @@ def test_parsed_product_lands_in_csv():
     assert lines[0].startswith("sku,title,price"), lines[0]
     assert len(lines) == 2, lines
     assert "Кресло офисное компьютерное" in lines[1]
-

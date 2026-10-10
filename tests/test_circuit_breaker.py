@@ -59,8 +59,9 @@ def scripted(monkeypatch):
     monkeypatch.setattr(storage, "save", lambda rows, **kwargs: None)
     monkeypatch.setattr(parse, "sync_playwright", contextlib.nullcontext)
     monkeypatch.setattr(parse.browser_utils, "launch", lambda playwright: FakeBrowser())
-    monkeypatch.setattr(parse.browser_utils, "new_context",
-                        lambda browser, storage_state=None: FakeContext())
+    monkeypatch.setattr(
+        parse.browser_utils, "new_context", lambda browser, storage_state=None: FakeContext()
+    )
     monkeypatch.setattr(parse.browser_utils, "pass_challenge", lambda page, response: True)
     monkeypatch.setattr(parse.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(config, "MAX_CONSECUTIVE_FAILURES", 4)
@@ -125,8 +126,14 @@ def test_failed_antibot_checks_stop_the_run_sooner(scripted):
 def test_antibot_series_is_broken_by_other_outcomes(scripted):
     # antibot, fetch_error, antibot, ok, antibot - двух проверок подряд нет,
     # а серия любых неудач (3) не дотягивает до 4.
-    results = {"1": "antibot", "2": "fetch_error", "3": "antibot", "4": "ok", "5": "antibot",
-               "6": "ok"}
+    results = {
+        "1": "antibot",
+        "2": "fetch_error",
+        "3": "antibot",
+        "4": "ok",
+        "5": "antibot",
+        "6": "ok",
+    }
     calls = scripted(results)
     observer = Recorder()
     parse.run(skus(6), batch_size=0, observer=observer)
@@ -166,8 +173,9 @@ def test_ordinary_fetch_errors_are_still_retried(monkeypatch):
 def test_blocked_run_is_not_restarted_in_a_new_browser(scripted, monkeypatch):
     """Остановка предохранителем - не падение браузера: перезапуска нет."""
     launches: list = []
-    monkeypatch.setattr(parse.browser_utils, "launch",
-                        lambda playwright: launches.append(1) or FakeBrowser())
+    monkeypatch.setattr(
+        parse.browser_utils, "launch", lambda playwright: launches.append(1) or FakeBrowser()
+    )
     monkeypatch.setattr(config, "MAX_BROWSER_RESTARTS", 2)
     scripted({})
     parse.run(skus(10), batch_size=0, observer=Recorder())

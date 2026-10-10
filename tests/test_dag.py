@@ -85,13 +85,16 @@ def install_stubs() -> None:
     Путь Airflow 3 (airflow.providers.standard) намеренно не подменяется:
     DAG должен откатиться на импорт Airflow 2.
     """
-    sys.modules.update({
-        "airflow": stub_module("airflow", DAG=FakeDAG),
-        "airflow.operators": stub_module("airflow.operators"),
-        "airflow.operators.bash": stub_module("airflow.operators.bash", BashOperator=FakeTask),
-        "pendulum": stub_module("pendulum",
-                                datetime=lambda *args, **kwargs: dt.datetime(*args)),
-    })
+    sys.modules.update(
+        {
+            "airflow": stub_module("airflow", DAG=FakeDAG),
+            "airflow.operators": stub_module("airflow.operators"),
+            "airflow.operators.bash": stub_module("airflow.operators.bash", BashOperator=FakeTask),
+            "pendulum": stub_module(
+                "pendulum", datetime=lambda *args, **kwargs: dt.datetime(*args)
+            ),
+        }
+    )
 
 
 _loaded = None
@@ -143,16 +146,19 @@ def render(template_text, variables):
     env.filters["ds"] = lambda value: value.strftime("%Y-%m-%d")
 
     var_accessor = types.SimpleNamespace(value=variables)
-    return env.from_string(template_text).render(
-        var=var_accessor,
-        data_interval_start=INTERVAL_START,
-        data_interval_end=INTERVAL_END,
-    ).strip()
+    return (
+        env.from_string(template_text)
+        .render(
+            var=var_accessor,
+            data_interval_start=INTERVAL_START,
+            data_interval_end=INTERVAL_END,
+        )
+        .strip()
+    )
 
 
 def _templates(module):
-    return (("parse_products", module.PARSE_COMMAND),
-            ("check_result", module.CHECK_COMMAND))
+    return (("parse_products", module.PARSE_COMMAND), ("check_result", module.CHECK_COMMAND))
 
 
 # ------------------------------------------------------------------ тесты ---
@@ -233,8 +239,9 @@ def test_min_success_rate_is_passed_to_parser():
     """Один разобранный товар из пятисот не должен считаться успехом."""
     module = load_dag()
     assert "--min-success-rate 0.8" in render(module.PARSE_COMMAND, {})
-    assert "--min-success-rate 0.5" in render(module.PARSE_COMMAND,
-                                              {"ozon_min_success_rate": "0.5"})
+    assert "--min-success-rate 0.5" in render(
+        module.PARSE_COMMAND, {"ozon_min_success_rate": "0.5"}
+    )
 
 
 def test_session_task_refreshes_stale_session_without_human():

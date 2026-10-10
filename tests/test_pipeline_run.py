@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as dt
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -20,8 +19,15 @@ from price_panel.settings import parse_settings
 from price_panel.warehouse import Warehouse
 
 SETTINGS_DATA = {
-    "discovery": {"categories": [{"name": "phones", "panel_size": 5,
-                                  "url": "https://www.ozon.ru/category/smartfony-15502/"}]},
+    "discovery": {
+        "categories": [
+            {
+                "name": "phones",
+                "panel_size": 5,
+                "url": "https://www.ozon.ru/category/smartfony-15502/",
+            }
+        ]
+    },
     "parser": {"min_success_rate": 0.5},
 }
 SETTINGS = parse_settings(SETTINGS_DATA)
@@ -48,10 +54,25 @@ class FakeWarehouse(Warehouse):
         self.runs[1] = {"kind": kind, "source": sku_source, "total": total_sku}
         return 1
 
-    def finish_parse_run(self, run_id, status, processed, success, errors, duration_seconds,
-                         sku_per_minute, avg_sku_seconds):
-        self.runs[run_id].update(status=status, processed=processed, success=success,
-                                 errors=errors, speed=sku_per_minute, avg=avg_sku_seconds)
+    def finish_parse_run(
+        self,
+        run_id,
+        status,
+        processed,
+        success,
+        errors,
+        duration_seconds,
+        sku_per_minute,
+        avg_sku_seconds,
+    ):
+        self.runs[run_id].update(
+            status=status,
+            processed=processed,
+            success=success,
+            errors=errors,
+            speed=sku_per_minute,
+            avg=avg_sku_seconds,
+        )
 
     def record_product(self, run_id, product, collected_at=None):
         if product["sku"] in self.broken:
@@ -65,8 +86,9 @@ class FakeWarehouse(Warehouse):
         return set(self.without_details)
 
 
-def scripted_browser(results: dict, seen_options: Optional[list] = None):
+def scripted_browser(results: dict, seen_options: list | None = None):
     """parse_in_browser, который отдаёт заранее заданные итоги SKU."""
+
     def run_session(progress, state, total, flush_batch):
         if seen_options is not None:
             seen_options.append(progress.options)
@@ -74,14 +96,16 @@ def scripted_browser(results: dict, seen_options: Optional[list] = None):
             sku = progress.pending.pop(0)
             kind = results.get(sku, "ok")
             if kind == "ok":
-                outcome = SkuOutcome(sku=sku, product={"sku": sku, "title": "t", "price": 1.0},
-                                     attempts=1)
+                outcome = SkuOutcome(
+                    sku=sku, product={"sku": sku, "title": "t", "price": 1.0}, attempts=1
+                )
                 progress.rows.append(outcome.product)
             else:
                 outcome = SkuOutcome(sku=sku, error_type=kind, error_message="fail", attempts=3)
                 progress.failed.append(sku)
             progress.notify(outcome, 2.0)
             flush_batch()
+
     return run_session
 
 
@@ -95,8 +119,9 @@ def no_side_effects(monkeypatch):
 
 
 def test_every_sku_ends_up_in_history_or_errors(monkeypatch):
-    monkeypatch.setattr(parse, "parse_in_browser",
-                        scripted_browser({"2": "not_found", "3": "fetch_error"}))
+    monkeypatch.setattr(
+        parse, "parse_in_browser", scripted_browser({"2": "not_found", "3": "fetch_error"})
+    )
     wh = FakeWarehouse()
     report = pipeline.run_parse(wh, ["1", "2", "3", "4"], SETTINGS)
 
@@ -104,7 +129,7 @@ def test_every_sku_ends_up_in_history_or_errors(monkeypatch):
     assert wh.errors == [("2", "not_found"), ("3", "fetch_error")]
     assert report.status == "partial"
     assert report.processed == 4
-    assert report.exit_code == 0                      # 50% >= min_success_rate 0.5
+    assert report.exit_code == 0  # 50% >= min_success_rate 0.5
     assert wh.runs[1]["status"] == "partial"
     assert wh.runs[1]["success"] == 2 and wh.runs[1]["errors"] == 2
     assert wh.runs[1]["avg"] == 2.0
@@ -134,8 +159,9 @@ def test_crashed_browser_leaves_skus_as_not_processed(monkeypatch):
 
 def test_blocked_run_has_its_own_exit_code(monkeypatch):
     """Планировщик по коду выхода решает, повторять ли прогон позже."""
-    monkeypatch.setattr(parse, "parse_in_browser",
-                        scripted_browser({"2": "antibot", "3": "blocked"}))
+    monkeypatch.setattr(
+        parse, "parse_in_browser", scripted_browser({"2": "antibot", "3": "blocked"})
+    )
     report = pipeline.run_parse(FakeWarehouse(), ["1", "2", "3"], SETTINGS)
     assert report.status == "blocked"
     assert report.exit_code == pipeline.EXIT_BLOCKED != 1
@@ -147,6 +173,7 @@ def test_broken_session_is_visible_in_run_accounting(monkeypatch):
     Отсутствие файла сессии - не ошибка (карточки открываются без входа), а
     повреждённый файл (например, каталог вместо него от Docker) - ошибка.
     """
+
     def broken_session(path):
         raise session.SessionError("Файл cookies повреждён")
 
@@ -161,10 +188,12 @@ def test_parser_settings_reach_the_browser_loop(monkeypatch):
     """price_source и расписание описаний из config.yaml доходят до разбора SKU."""
     seen: list = []
     monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}, seen))
-    settings = parse_settings({
-        "discovery": SETTINGS_DATA["discovery"],
-        "parser": {"price_source": "html", "details_refresh_days": 0},
-    })
+    settings = parse_settings(
+        {
+            "discovery": SETTINGS_DATA["discovery"],
+            "parser": {"price_source": "html", "details_refresh_days": 0},
+        }
+    )
     wh = FakeWarehouse()
     wh.without_details = {"2"}
     pipeline.run_parse(wh, ["1", "2"], settings)
@@ -179,12 +208,16 @@ def test_details_are_spread_over_the_week():
     wh = FakeWarehouse()
     wh.without_details = {"new"}
     skus = [str(1_000_000 + n) for n in range(700)]
-    week = [pipeline.details_schedule(wh, skus + ["new"], 7, dt.date(2026, 10, 6) +
-                                      dt.timedelta(days=day)) for day in range(7)]
+    week = [
+        pipeline.details_schedule(
+            wh, skus + ["new"], 7, dt.date(2026, 10, 6) + dt.timedelta(days=day)
+        )
+        for day in range(7)
+    ]
 
     assert all(due is not None for due in week)
     assert all(sum(sku in due for due in week if due) == 1 for sku in skus)
-    assert all("new" in due for due in week if due)   # без описания - каждый день
+    assert all("new" in due for due in week if due)  # без описания - каждый день
     assert 60 < len((week[0] or set()) - {"new"}) < 140  # около 1/7 panel в день
 
     # Раз в день - всем (None), без запроса к базе; 0 - только SKU без описания.
@@ -213,6 +246,7 @@ def test_storage_none_backend_writes_nothing():
 
 def test_run_status():
     from collections import Counter
+
     assert pipeline.run_status(3, Counter()) == "success"
     assert pipeline.run_status(3, Counter(not_found=1)) == "partial"
     assert pipeline.run_status(0, Counter(fetch_error=2)) == "failed"
@@ -247,8 +281,7 @@ class QueueWarehouse(FakeWarehouse):
 
     def panel_skus(self, categories=None, limit=None, missing_since=None):
         self.since = missing_since or self.since
-        skus = [s for s in self.panel
-                if missing_since is None or s not in self.collected_today]
+        skus = [s for s in self.panel if missing_since is None or s not in self.collected_today]
         return skus[:limit] if limit is not None else skus
 
     def migrate(self):

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "price-panel"
 version = "2.0.0"
 description = "Ежедневный сбор цен маркетплейсов: discovery -> SKU panel -> парсинг -> PostgreSQL (история цен)"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "playwright==1.63.0",
     "google-api-python-client==2.147.0",
@@ -54,14 +54,14 @@ addopts = "-q --tb=short"
 
 # Проверка типов: те же настройки подхватывает Pylance в VS Code.
 [tool.pyright]
-pythonVersion = "3.9"
+pythonVersion = "3.11"
 venvPath = "."
 venv = ".venv"
 exclude = [".venv", "logs", "data", "**/__pycache__"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 exclude = [".venv", "logs", "data"]
 
 [tool.ruff.lint]
@@ -72,10 +72,11 @@ select = ["E", "W", "F", "I", "B", "BLE", "UP"]
 ignore = [
     # Сообщения и шаблоны SQL собираются через .format() - единый стиль проекта.
     "UP032",
-    # Optional[X] вместо X | None: пакет поддерживает Python 3.9.
-    "UP045",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Тесты намеренно лезут во внутренности модулей и подменяют sys.modules.
 "tests/*" = ["BLE001"]
+# Airflow DAG старого сценария исполняет Python самого Airflow, версия которого
+# не обязана совпадать с проектной: синтаксис 3.11 туда не переносим.
+"dags/*" = ["UP"]

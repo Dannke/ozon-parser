@@ -1,4 +1,4 @@
-# Проверки на каждый PR и push в main: ruff, pyright, все тесты.
+# Проверки на каждый PR и push в main: ruff (линтер и формат), pyright, все тесты.
 #
 # Тесты идут с настоящим PostgreSQL (сервис ниже) и браузером Playwright, так
 # что проверки базы и сквозные эталоны (tests/golden) здесь не пропускаются.
@@ -49,7 +49,9 @@ jobs:
           .venv/bin/python -m playwright install --with-deps chromium
 
       - name: Ruff
-        run: .venv/bin/ruff check .
+        run: |
+          .venv/bin/ruff check .
+          .venv/bin/ruff format --check .
 
       - name: Pyright
         run: .venv/bin/pyright

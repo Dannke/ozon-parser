@@ -67,19 +67,22 @@ def wh():
 @pytest.fixture
 def select(wh):
     """select(sql) - строки запроса к тестовой базе словарями {колонка: значение}."""
+
     def run(sql: str) -> list:
         def query(cursor) -> list:
             cursor.execute(sql)
             names = [column[0] for column in cursor.description]
-            return [dict(zip(names, row)) for row in cursor.fetchall()]
+            return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+
         return wh.run(query)
+
     return run
 
 
 def _golden_value(value):
     # Время - в UTC: иначе эталон зависел бы от часового пояса сессии базы.
     if isinstance(value, dt.datetime):
-        return value.astimezone(dt.timezone.utc).isoformat()
+        return value.astimezone(dt.UTC).isoformat()
     if isinstance(value, (dt.date, decimal.Decimal)):
         return str(value)
     raise TypeError("{!r} не сериализуется в эталон".format(value))
@@ -93,13 +96,17 @@ def golden():
     Поведение изменилось намеренно - перезапишите эталон и проверьте дифф:
     UPDATE_GOLDEN=1 pytest <тест>.
     """
+
     def check(name: str, data) -> None:
         path = GOLDEN_DIR / "{}.json".format(name)
-        text = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True,
-                          default=_golden_value) + "\n"
+        text = (
+            json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True, default=_golden_value)
+            + "\n"
+        )
         if os.getenv("UPDATE_GOLDEN") == "1":
             path.parent.mkdir(exist_ok=True)
             path.write_text(text, encoding="utf-8")
         assert path.exists(), "Нет эталона {} - создайте: UPDATE_GOLDEN=1 pytest".format(path)
         assert json.loads(text) == json.loads(path.read_text(encoding="utf-8"))
+
     return check

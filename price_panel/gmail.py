@@ -27,7 +27,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
@@ -48,8 +48,9 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 # Границы слова и числа обязательны: без них "barcode 12345678" дал бы код
 # 123456, а "shipping" сошёл бы за "pin".
 KEYWORD_CODE_PATTERNS: tuple[re.Pattern, ...] = (
-    re.compile(r"\b(?:код(?:\s+подтверждения)?|code|pin)\b\D{0,20}?(?<!\d)(\d{4,6})(?!\d)",
-               re.IGNORECASE),
+    re.compile(
+        r"\b(?:код(?:\s+подтверждения)?|code|pin)\b\D{0,20}?(?<!\d)(\d{4,6})(?!\d)", re.IGNORECASE
+    ),
     re.compile(r"(?<!\d)(\d{4,6})(?!\d)\s*[-:—]?\s*(?:ваш\s+)?код\b", re.IGNORECASE),
 )
 
@@ -111,7 +112,7 @@ class GmailCodeReader:
         self.settings = settings
         # Клиент Gmail API. Его методы (users(), messages() ...) создаются
         # динамически из описания API, поэтому статически он типизируется как Any.
-        self._service: Optional[Any] = None
+        self._service: Any | None = None
 
     # --------------------------------------------------------------- доступ --
     def _authorize(self) -> Credentials:
@@ -137,7 +138,7 @@ class GmailCodeReader:
             log.warning("Не удалось сохранить токен: %s", exc)
         return creds
 
-    def _load_saved_token(self) -> Optional[Credentials]:
+    def _load_saved_token(self) -> Credentials | None:
         """Учётные данные из token.json; None - файла нет или он повреждён."""
         token_file = self.settings.token_file
         if not token_file.exists():
@@ -149,7 +150,7 @@ class GmailCodeReader:
             return None
 
     @staticmethod
-    def _refresh(creds: Credentials) -> Optional[Credentials]:
+    def _refresh(creds: Credentials) -> Credentials | None:
         """Обновляет протухший токен без участия человека; None - не вышло."""
         try:
             log.info("Обновляю истёкший токен Gmail")
@@ -287,7 +288,7 @@ class GmailCodeReader:
         return HTML_ENTITY_RE.sub(" ", clean)
 
     @classmethod
-    def extract_code(cls, text: str, headline: str = "") -> Optional[str]:
+    def extract_code(cls, text: str, headline: str = "") -> str | None:
         """Достаёт код подтверждения из письма (или None, если не нашёлся).
 
         :param text: тело письма; здесь код обязан стоять рядом с ключевым словом.
@@ -326,7 +327,7 @@ class GmailCodeReader:
             raise GmailError("Ошибка поиска писем: {}".format(exc)) from exc
         return response.get("messages", [])
 
-    def _fetch_message(self, message_id: str) -> Optional[dict]:
+    def _fetch_message(self, message_id: str) -> dict | None:
         try:
             return (
                 self._api.users()
@@ -338,8 +339,9 @@ class GmailCodeReader:
             log.warning("Не удалось прочитать письмо %s: %s", message_id, exc)
             return None
 
-    def _code_from_messages(self, messages: Iterable, since_ms: int,
-                            seen: Optional[set] = None) -> Optional[str]:
+    def _code_from_messages(
+        self, messages: Iterable, since_ms: int, seen: set | None = None
+    ) -> str | None:
         """Проверяет письма (от новых к старым) и возвращает первый найденный код.
 
         Идентификаторы просмотренных писем складываются в ``seen``, чтобы
@@ -371,8 +373,9 @@ class GmailCodeReader:
                 if recipients and self.settings.recipient.lower() not in recipients:
                     continue
 
-            headline = " ".join(part for part in (headers.get("subject", ""),
-                                                  message.get("snippet", "")) if part)
+            headline = " ".join(
+                part for part in (headers.get("subject", ""), message.get("snippet", "")) if part
+            )
             code = self.extract_code(self._collect_text(payload), headline=headline)
             if code:
                 log.info("Код найден в письме от %s", headers.get("from", "?"))
@@ -380,7 +383,7 @@ class GmailCodeReader:
             log.debug("В письме %s код не распознан", message_id)
         return None
 
-    def wait_for_code(self, since_ts: float, timeout: Optional[int] = None) -> str:
+    def wait_for_code(self, since_ts: float, timeout: int | None = None) -> str:
         """Опрашивает почту, пока не придёт письмо с кодом подтверждения.
 
         Просмотренные письма запоминаются, чтобы каждая итерация опроса не
@@ -409,8 +412,9 @@ class GmailCodeReader:
                 messages = self._search_messages(query)
             except GmailTransientError as exc:
                 backoff = min(backoff * 2 or self.settings.poll_interval, MAX_BACKOFF_SECONDS)
-                log.warning("Попытка %s: временная ошибка Gmail (%s), жду %s с",
-                            attempt, exc, backoff)
+                log.warning(
+                    "Попытка %s: временная ошибка Gmail (%s), жду %s с", attempt, exc, backoff
+                )
                 time.sleep(backoff)
                 continue
             backoff = 0

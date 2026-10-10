@@ -12,7 +12,6 @@ from __future__ import annotations
 import datetime as dt
 import time
 from pathlib import Path
-from typing import Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -44,7 +43,7 @@ CONTEXT_DEFAULTS = {
 LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 
 
-def launch(playwright, headless: Optional[bool] = None):
+def launch(playwright, headless: bool | None = None):
     """Поднимает браузер согласно настройкам.
 
     Если канал задан явно (BROWSER_CHANNEL), используется только он. Иначе
@@ -72,8 +71,9 @@ def launch(playwright, headless: Optional[bool] = None):
             log.debug("Канал %s недоступен: %s", channel, str(exc).splitlines()[0])
             continue
         log.info("Использую системный браузер: %s", channel)
-        log.info("Чтобы не терять время на лишние попытки, добавьте в .env: "
-                 "BROWSER_CHANNEL=%s", channel)
+        log.info(
+            "Чтобы не терять время на лишние попытки, добавьте в .env: BROWSER_CHANNEL=%s", channel
+        )
         return browser
 
     raise PlaywrightError(
@@ -136,7 +136,7 @@ def looks_like_challenge(page: Page, response=None) -> bool:
     return any(marker in visible for marker in constants.CHALLENGE_TEXT_MARKERS)
 
 
-def pass_challenge(page: Page, response=None, timeout: Optional[int] = None) -> bool:
+def pass_challenge(page: Page, response=None, timeout: int | None = None) -> bool:
     """Дожидается, пока антибот-проверка Ozon пройдёт сама. False - не прошла.
 
     Заглушка "Antibot Challenge Page" - это JS-проверка браузера: обычно
@@ -170,7 +170,7 @@ def pass_challenge(page: Page, response=None, timeout: Optional[int] = None) -> 
     return False
 
 
-def save_challenge_snapshot(page: Page, directory: Optional[Path] = None) -> Optional[Path]:
+def save_challenge_snapshot(page: Page, directory: Path | None = None) -> Path | None:
     """Снимок экрана и текст непройденной проверки - для разбора блокировки.
 
     Ошибки снимка не мешают работе: это диагностика, а не часть прогона.
@@ -186,8 +186,12 @@ def save_challenge_snapshot(page: Page, directory: Optional[Path] = None) -> Opt
         visible = " ".join((page.inner_text("body", timeout=5_000) or "").split())
     except PlaywrightError:
         title, visible = "", ""
-    log.warning("Непройденная проверка: url=%s title=%r текст=%r",
-                getattr(page, "url", ""), title, visible[:300])
+    log.warning(
+        "Непройденная проверка: url=%s title=%r текст=%r",
+        getattr(page, "url", ""),
+        title,
+        visible[:300],
+    )
     try:
         directory.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(path), full_page=False)

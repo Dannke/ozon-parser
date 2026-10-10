@@ -24,8 +24,8 @@ import contextlib
 import datetime as dt
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from . import config
 from .logger import get_logger
@@ -52,8 +52,9 @@ def compose_exec(*args: str) -> list:
 
 def _run(name: str, command: list, runner: Callable, **kwargs) -> subprocess.CompletedProcess:
     try:
-        return runner(command, cwd=str(config.BASE_DIR), timeout=TIMEOUT_SECONDS, check=False,
-                      **kwargs)
+        return runner(
+            command, cwd=str(config.BASE_DIR), timeout=TIMEOUT_SECONDS, check=False, **kwargs
+        )
     except FileNotFoundError as exc:
         raise BackupError("не найден docker - нужен запущенный Docker Desktop с базой") from exc
     except subprocess.TimeoutExpired as exc:
@@ -66,8 +67,9 @@ def _stderr(result: subprocess.CompletedProcess) -> str:
     return " ".join(text.split())[-300:]
 
 
-def create_backup(directory: Path, keep: int, today: Optional[dt.date] = None,
-                  runner: Callable = subprocess.run) -> Path:
+def create_backup(
+    directory: Path, keep: int, today: dt.date | None = None, runner: Callable = subprocess.run
+) -> Path:
     """Снимает копию базы в directory/ozon-ГГГГ-ММ-ДД.dump и удаляет лишние старые.
 
     :raises BackupError: копия не создана; прежние копии при этом не трогаются.
@@ -77,12 +79,19 @@ def create_backup(directory: Path, keep: int, today: Optional[dt.date] = None,
     tmp = target.with_name(target.name + ".tmp")
     try:
         with tmp.open("wb") as handle:
-            result = _run("pg_dump", compose_exec("pg_dump", "-U", config.POSTGRES_USER,
-                                                  "-d", config.POSTGRES_DB, "-Fc"),
-                          runner, stdout=handle, stderr=subprocess.PIPE)
+            result = _run(
+                "pg_dump",
+                compose_exec(
+                    "pg_dump", "-U", config.POSTGRES_USER, "-d", config.POSTGRES_DB, "-Fc"
+                ),
+                runner,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+            )
         if result.returncode != 0:
-            raise BackupError("pg_dump завершился с кодом {}: {}".format(
-                result.returncode, _stderr(result)))
+            raise BackupError(
+                "pg_dump завершился с кодом {}: {}".format(result.returncode, _stderr(result))
+            )
         verify(tmp, runner)
         os.replace(tmp, target)
     finally:
@@ -90,8 +99,12 @@ def create_backup(directory: Path, keep: int, today: Optional[dt.date] = None,
             tmp.unlink(missing_ok=True)
 
     removed = prune(directory, keep)
-    log.info("Резервная копия базы: %s (%.1f МБ), удалено старых копий: %s",
-             target, target.stat().st_size / 2**20, len(removed))
+    log.info(
+        "Резервная копия базы: %s (%.1f МБ), удалено старых копий: %s",
+        target,
+        target.stat().st_size / 2**20,
+        len(removed),
+    )
     return target
 
 
@@ -107,12 +120,21 @@ def verify(path: Path, runner: Callable = subprocess.run) -> None:
     # читает дескриптор ОС, а после буферизованного read() он стоит дальше
     # начала файла, даже если tell() показывает 0.
     with path.open("rb") as handle:
-        result = _run("pg_restore", compose_exec("pg_restore", "--list"), runner,
-                      stdin=handle, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = _run(
+            "pg_restore",
+            compose_exec("pg_restore", "--list"),
+            runner,
+            stdin=handle,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
     listing = (result.stdout or b"").decode("utf-8", errors="replace")
     if result.returncode != 0 or EXPECTED_ENTRY not in listing:
-        raise BackupError("pg_restore не читает копию {}: {}".format(
-            path.name, _stderr(result) or "в оглавлении нет истории цен"))
+        raise BackupError(
+            "pg_restore не читает копию {}: {}".format(
+                path.name, _stderr(result) or "в оглавлении нет истории цен"
+            )
+        )
 
 
 def prune(directory: Path, keep: int) -> list:

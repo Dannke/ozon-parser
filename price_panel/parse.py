@@ -44,7 +44,6 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
@@ -111,14 +110,14 @@ class ParseOptions:
     # характеристики (art_set, has_rich_content). None - всем, как в старом
     # сценарии. Конвейер спрашивает её по расписанию (pipeline.details_schedule):
     # это лишний запрос к Ozon на каждый товар, а меняется она редко.
-    details_for: Optional[frozenset] = None
+    details_for: frozenset | None = None
 
     def wants_details(self, sku: str) -> bool:
         return self.details_for is None or sku in self.details_for
 
 
 # Когда открывалась последняя страница Ozon (time.monotonic) - для PAGE_INTERVAL.
-_last_page_open: Optional[float] = None
+_last_page_open: float | None = None
 
 
 def wait_page_slot() -> None:
@@ -249,7 +248,7 @@ def settle_page(page: Page, sku: str) -> None:
     page.wait_for_timeout(config.PAGE_SETTLE_MS)
 
 
-def fetch_details(page: Page, sku: str) -> Optional[dict]:
+def fetch_details(page: Page, sku: str) -> dict | None:
     """Состояния виджетов второй части карточки: описание и полные характеристики.
 
     None - не получены: карточка разберётся и без них, но art_set и
@@ -266,10 +265,11 @@ def fetch_details(page: Page, sku: str) -> Optional[dict]:
 def html_is_enough(product: dict) -> bool:
     """В HTML нашлась карточка: название и цена (или явное «нет в наличии»)."""
     return bool(product.get("title")) and (
-        bool(product.get("price")) or product.get("is_available") is False)
+        bool(product.get("price")) or product.get("is_available") is False
+    )
 
 
-def parse_sku(page: Page, sku: str, options: Optional[ParseOptions] = None) -> dict:
+def parse_sku(page: Page, sku: str, options: ParseOptions | None = None) -> dict:
     """Собирает данные по одному SKU (порядок источников - см. шапку модуля)."""
     options = options or ParseOptions()
     details = options.wants_details(sku)
@@ -315,7 +315,7 @@ class SkuOutcome:
     """Итог обработки одного SKU: запись о товаре либо причина неудачи."""
 
     sku: str
-    product: Optional[dict] = None
+    product: dict | None = None
     error_type: str = ""
     error_message: str = ""
     attempts: int = 0
@@ -336,8 +336,9 @@ def error_type_of(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-def parse_sku_outcome(page: Page, sku: str, retries: int,
-                      options: Optional[ParseOptions] = None) -> SkuOutcome:
+def parse_sku_outcome(
+    page: Page, sku: str, retries: int, options: ParseOptions | None = None
+) -> SkuOutcome:
     """Разбирает SKU с повторами при временных ошибках и сообщает, чем кончилось.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
@@ -375,8 +376,7 @@ def parse_sku_outcome(page: Page, sku: str, retries: int,
             if isinstance(exc, PlaywrightError) and browser_is_gone(page, exc):
                 raise BrowserGone(str(exc)) from exc
             outcome.error_type, outcome.error_message = error_type_of(exc), str(exc)
-            log.warning("SKU %s: попытка %s из %s не удалась: %s",
-                        sku, attempt, retries + 1, exc)
+            log.warning("SKU %s: попытка %s из %s не удалась: %s", sku, attempt, retries + 1, exc)
             if attempt <= retries:
                 pause = config.REQUEST_DELAY * attempt
                 log.info("SKU %s: повтор через %.1f с", sku, pause)
@@ -386,7 +386,7 @@ def parse_sku_outcome(page: Page, sku: str, retries: int,
     return outcome
 
 
-def parse_sku_with_retries(page: Page, sku: str, retries: int) -> Optional[dict]:
+def parse_sku_with_retries(page: Page, sku: str, retries: int) -> dict | None:
     """Оборачивает parse_sku повторными попытками при временных ошибках.
 
     :raises BrowserGone: браузер упал - повторять в этой вкладке бессмысленно.
@@ -406,8 +406,9 @@ class RunObserver:
     def sku_done(self, sku: str, product: dict, seconds: float) -> None:
         """SKU разобран."""
 
-    def sku_failed(self, sku: str, error_type: str, message: str, seconds: float,
-                   attempts: int = 0) -> None:
+    def sku_failed(
+        self, sku: str, error_type: str, message: str, seconds: float, attempts: int = 0
+    ) -> None:
         """SKU не разобран: товара нет, исчерпаны попытки или до него не дошли."""
 
 
@@ -451,8 +452,10 @@ class RunProgress:
             self.consecutive_challenges += 1
         else:
             self.consecutive_challenges = 0
-        limits = ((config.MAX_CONSECUTIVE_FAILURES, self.consecutive_failures),
-                  (config.MAX_CONSECUTIVE_CHALLENGES, self.consecutive_challenges))
+        limits = (
+            (config.MAX_CONSECUTIVE_FAILURES, self.consecutive_failures),
+            (config.MAX_CONSECUTIVE_CHALLENGES, self.consecutive_challenges),
+        )
         if any(0 < limit <= count for limit, count in limits):
             self.blocked = True
 
@@ -462,14 +465,20 @@ class RunProgress:
             if outcome.product is not None:
                 self.observer.sku_done(outcome.sku, outcome.product, seconds)
             else:
-                self.observer.sku_failed(outcome.sku, outcome.error_type or "unknown",
-                                         outcome.error_message, seconds, outcome.attempts)
+                self.observer.sku_failed(
+                    outcome.sku,
+                    outcome.error_type or "unknown",
+                    outcome.error_message,
+                    seconds,
+                    outcome.attempts,
+                )
         except Exception:  # noqa: BLE001 - ошибка записи не повод бросать очередь
             log.exception("SKU %s: не удалось записать результат", outcome.sku)
 
 
-def save_results(rows: list, backend: str, output: Optional[Path],
-                 snapshot_date: Optional[dt.date]) -> bool:
+def save_results(
+    rows: list, backend: str, output: Path | None, snapshot_date: dt.date | None
+) -> bool:
     """Сохраняет собранное. Возвращает False, если сохранить не удалось."""
     try:
         storage.save(rows, backend=backend, csv_path=output, snapshot_date=snapshot_date)
@@ -479,8 +488,7 @@ def save_results(rows: list, backend: str, output: Optional[Path],
         return False
 
 
-def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
-                     flush_batch) -> None:
+def parse_in_browser(progress: RunProgress, state: dict | None, total: int, flush_batch) -> None:
     """Обходит оставшиеся SKU в одном экземпляре браузера.
 
     SKU снимается с очереди только после обработки: если браузер упадёт на
@@ -497,8 +505,9 @@ def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
             # открываются через проверку.
             log.info("Прогреваю сессию на ozon.ru")
             wait_page_slot()
-            response = page.goto("https://www.ozon.ru/", wait_until="domcontentloaded",
-                                 timeout=config.PAGE_TIMEOUT)
+            response = page.goto(
+                "https://www.ozon.ru/", wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
+            )
             browser_utils.pass_challenge(page, response)
             page.wait_for_timeout(2_000)
 
@@ -512,9 +521,12 @@ def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
                 progress.record(outcome, time.monotonic() - started)
                 flush_batch()
                 if progress.blocked:
-                    log.error("Ozon не отдаёт данные %s SKU подряд - похоже на блокировку. "
-                              "Прогон остановлен, чтобы не нагружать сайт; осталось SKU: %s",
-                              progress.consecutive_failures, len(progress.pending))
+                    log.error(
+                        "Ozon не отдаёт данные %s SKU подряд - похоже на блокировку. "
+                        "Прогон остановлен, чтобы не нагружать сайт; осталось SKU: %s",
+                        progress.consecutive_failures,
+                        len(progress.pending),
+                    )
                     return
 
                 # Пауза между товарами, чтобы не долбить сайт очередью запросов;
@@ -525,10 +537,16 @@ def parse_in_browser(progress: RunProgress, state: Optional[dict], total: int,
             browser_utils.close_quietly(context, browser)
 
 
-def run(skus, storage_backend: str = "", output: Optional[Path] = None,
-        snapshot_date: Optional[dt.date] = None, batch_size: Optional[int] = None,
-        min_success_rate: float = 0.0, observer: Optional[RunObserver] = None,
-        options: Optional[ParseOptions] = None) -> int:
+def run(
+    skus,
+    storage_backend: str = "",
+    output: Path | None = None,
+    snapshot_date: dt.date | None = None,
+    batch_size: int | None = None,
+    min_success_rate: float = 0.0,
+    observer: RunObserver | None = None,
+    options: ParseOptions | None = None,
+) -> int:
     """Парсит список SKU и сохраняет результат. Возвращает код возврата процесса.
 
     :param snapshot_date: дата среза для таблиц БД (по умолчанию сегодня).
@@ -551,8 +569,9 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
         return 1
 
     batch_size = config.BATCH_SIZE if batch_size is None else batch_size
-    progress = RunProgress(pending=list(skus), observer=observer or RunObserver(),
-                           options=options or ParseOptions())
+    progress = RunProgress(
+        pending=list(skus), observer=observer or RunObserver(), options=options or ParseOptions()
+    )
     log.info("К обработке SKU: %s", len(skus))
 
     def flush_batch() -> None:
@@ -580,23 +599,35 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
                 # Со стек-трейсом: сюда попадают и программные ошибки.
                 log.exception("Сессия браузера завершилась аварийно")
         if progress.blocked:
-            unprocessed = ("blocked", "прогон остановлен: Ozon не отдавал данные {} SKU "
-                           "подряд".format(progress.consecutive_failures))
+            unprocessed = (
+                "blocked",
+                "прогон остановлен: Ozon не отдавал данные {} SKU подряд".format(
+                    progress.consecutive_failures
+                ),
+            )
             break
         if not progress.pending:
             break
         restarts += 1
         if restarts > config.MAX_BROWSER_RESTARTS:
-            log.error("Браузер падал %s раз(а) - прекращаю, необработанных SKU: %s",
-                      restarts, len(progress.pending))
+            log.error(
+                "Браузер падал %s раз(а) - прекращаю, необработанных SKU: %s",
+                restarts,
+                len(progress.pending),
+            )
             break
-        log.warning("Перезапускаю браузер (%s из %s), осталось SKU: %s",
-                    restarts, config.MAX_BROWSER_RESTARTS, len(progress.pending))
+        log.warning(
+            "Перезапускаю браузер (%s из %s), осталось SKU: %s",
+            restarts,
+            config.MAX_BROWSER_RESTARTS,
+            len(progress.pending),
+        )
 
     # Не обработанные из-за сбоя SKU - тоже неудача.
     for sku in progress.pending:
-        progress.notify(SkuOutcome(sku=sku, error_type=unprocessed[0],
-                                   error_message=unprocessed[1]), 0.0)
+        progress.notify(
+            SkuOutcome(sku=sku, error_type=unprocessed[0], error_message=unprocessed[1]), 0.0
+        )
     progress.failed.extend(progress.pending)
 
     # Финальное сохранение делается всегда, даже на пустом результате: иначе
@@ -606,16 +637,24 @@ def run(skus, storage_backend: str = "", output: Optional[Path] = None,
 
     rows, failed = progress.rows, progress.failed
     success_rate = len(rows) / len(skus)
-    log.info("Итог: успешно %s из %s (%.0f%%), с ошибкой %s",
-             len(rows), len(skus), success_rate * 100, len(failed))
+    log.info(
+        "Итог: успешно %s из %s (%.0f%%), с ошибкой %s",
+        len(rows),
+        len(skus),
+        success_rate * 100,
+        len(failed),
+    )
     if failed:
         log.warning("Не удалось обработать SKU: %s", ", ".join(failed))
 
     if not rows or progress.blocked:
         return 1
     if min_success_rate > 0 and success_rate < min_success_rate:
-        log.error("Доля успеха %.0f%% ниже порога %.0f%% - считаю прогон неудачным",
-                  success_rate * 100, min_success_rate * 100)
+        log.error(
+            "Доля успеха %.0f%% ниже порога %.0f%% - считаю прогон неудачным",
+            success_rate * 100,
+            min_success_rate * 100,
+        )
         return 1
     return 0
 
@@ -631,26 +670,33 @@ def read_skus_file(path: Path) -> list:
     if not path.exists():
         raise FileNotFoundError("Файл со списком SKU не найден: {}".format(path))
     # utf-8-sig: CSV, сохранённый из Excel, начинается с BOM.
-    lines = (line.split(",", 1)[0].strip()
-             for line in path.read_text(encoding="utf-8-sig").splitlines())
-    return list(dict.fromkeys(
-        line for line in lines
-        if line and not line.startswith("#") and line.lower() != "sku"
-    ))
+    lines = (
+        line.split(",", 1)[0].strip() for line in path.read_text(encoding="utf-8-sig").splitlines()
+    )
+    return list(
+        dict.fromkeys(
+            line for line in lines if line and not line.startswith("#") and line.lower() != "sku"
+        )
+    )
 
 
-def select_range(skus: list, offset: int = 0, limit: Optional[int] = None) -> list:
+def select_range(skus: list, offset: int = 0, limit: int | None = None) -> list:
     """Часть списка SKU: с какого начать и сколько взять.
 
     Позволяет разложить длинный список на несколько задач планировщика: при
     ~10-15 с на товар сорокаминутная задача успевает около двухсот SKU.
     """
-    selected = skus[max(offset, 0):]
+    selected = skus[max(offset, 0) :]
     if limit is not None and limit >= 0:
         selected = selected[:limit]
     if len(selected) != len(skus):
-        log.info("Из списка (%s) взято SKU: %s (offset=%s, limit=%s)",
-                 len(skus), len(selected), offset, limit)
+        log.info(
+            "Из списка (%s) взято SKU: %s (offset=%s, limit=%s)",
+            len(skus),
+            len(selected),
+            offset,
+            limit,
+        )
     return selected
 
 
@@ -660,17 +706,26 @@ def main() -> int:
     parser.add_argument("--file", type=Path, help="файл со списком SKU (по одному в строке)")
     cli.add_storage_arguments(parser)
     parser.add_argument("--output", type=Path, help="путь к CSV-файлу результата")
-    parser.add_argument("--offset", type=int, default=0,
-                        help="пропустить первые N SKU списка")
-    parser.add_argument("--limit", type=int,
-                        help="обработать не больше N SKU (вместе с --offset делит "
-                             "длинный список на части)")
-    parser.add_argument("--batch-size", type=int, default=None,
-                        help="сбрасывать собранное в хранилище каждые N товаров "
-                             "(0 - только в конце; по умолчанию из .env)")
-    parser.add_argument("--min-success-rate", type=float, default=0.0,
-                        help="минимальная доля успешных SKU от длины списка (0..1); "
-                             "ниже неё прогон считается неудачным")
+    parser.add_argument("--offset", type=int, default=0, help="пропустить первые N SKU списка")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="обработать не больше N SKU (вместе с --offset делит длинный список на части)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="сбрасывать собранное в хранилище каждые N товаров "
+        "(0 - только в конце; по умолчанию из .env)",
+    )
+    parser.add_argument(
+        "--min-success-rate",
+        type=float,
+        default=0.0,
+        help="минимальная доля успешных SKU от длины списка (0..1); "
+        "ниже неё прогон считается неудачным",
+    )
     args = parser.parse_args()
 
     try:
@@ -685,10 +740,14 @@ def main() -> int:
         log.error("%s", exc)
         return 1
 
-    return run(select_range(skus, args.offset, args.limit),
-               storage_backend=args.storage or "", output=args.output,
-               snapshot_date=snapshot_date, batch_size=args.batch_size,
-               min_success_rate=args.min_success_rate)
+    return run(
+        select_range(skus, args.offset, args.limit),
+        storage_backend=args.storage or "",
+        output=args.output,
+        snapshot_date=snapshot_date,
+        batch_size=args.batch_size,
+        min_success_rate=args.min_success_rate,
+    )
 
 
 if __name__ == "__main__":

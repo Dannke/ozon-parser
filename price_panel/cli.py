@@ -8,23 +8,22 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from typing import Optional
 
 STORAGE_CHOICES = ("csv", "postgres", "clickhouse")
 
-DATE_HELP = ("дата среза в формате ГГГГ-ММ-ДД "
-             "(по умолчанию сегодня; Airflow передаёт дату запуска)")
+DATE_HELP = "дата среза в формате ГГГГ-ММ-ДД (по умолчанию сегодня; Airflow передаёт дату запуска)"
 
 
-def add_storage_arguments(parser: argparse.ArgumentParser,
-                          storage_help: str = "куда сохранять результат (по умолчанию из .env)"
-                          ) -> None:
+def add_storage_arguments(
+    parser: argparse.ArgumentParser,
+    storage_help: str = "куда сохранять результат (по умолчанию из .env)",
+) -> None:
     """Добавляет --storage и --date - общие для обоих скриптов."""
     parser.add_argument("--storage", choices=list(STORAGE_CHOICES), help=storage_help)
     parser.add_argument("--date", help=DATE_HELP)
 
 
-def parse_date(value: Optional[str]) -> Optional[dt.date]:
+def parse_date(value: str | None) -> dt.date | None:
     """Разбирает значение --date.
 
     :raises ValueError: с текстом, готовым к выводу пользователю.

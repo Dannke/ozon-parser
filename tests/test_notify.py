@@ -12,7 +12,6 @@ import json
 import logging
 import urllib.error
 import urllib.parse
-from typing import Optional
 
 import pytest
 
@@ -34,7 +33,7 @@ class Response:
 class Recorder:
     """urlopen, который ничего не отправляет: запоминает запросы."""
 
-    def __init__(self, fail_with: Optional[Exception] = None):
+    def __init__(self, fail_with: Exception | None = None):
         self.requests: list = []
         self.fail_with = fail_with
 
@@ -104,8 +103,9 @@ def test_start_is_reported(configured):
 
 def test_retry_after_block_is_reported(configured):
     opener = Recorder()
-    notify.report_retry("16:00 MSK", 1, 2, details=lambda: "За сегодня собрано 348 из 1200",
-                        opener=opener)
+    notify.report_retry(
+        "16:00 MSK", 1, 2, details=lambda: "За сегодня собрано 348 из 1200", opener=opener
+    )
     (message,) = opener.requests
     text = sent_text(message)
     assert "капча" in text and "Повтор 1 из 2 в 16:00 MSK" in text and "348 из 1200" in text
@@ -113,8 +113,9 @@ def test_retry_after_block_is_reported(configured):
 
 def test_success_pings_and_reports_to_telegram(configured):
     opener = Recorder()
-    notify.report_job(0, True, summary=lambda: "За сегодня собрано 1200 из 1200 SKU panel",
-                      opener=opener)
+    notify.report_job(
+        0, True, summary=lambda: "За сегодня собрано 1200 из 1200 SKU panel", opener=opener
+    )
 
     ping, message = opener.requests
     assert ping.full_url == "https://hc-ping.com/uuid"
@@ -125,8 +126,9 @@ def test_success_pings_and_reports_to_telegram(configured):
 
 def test_problems_ping_fail_and_go_to_telegram(configured):
     opener = Recorder()
-    notify.report_job(3, False, summary=lambda: "Прогон 12 (daily): blocked, успешно 348 из 1200",
-                      opener=opener)
+    notify.report_job(
+        3, False, summary=lambda: "Прогон 12 (daily): blocked, успешно 348 из 1200", opener=opener
+    )
 
     ping, message = opener.requests
     assert ping.full_url == "https://hc-ping.com/uuid/fail"
@@ -141,8 +143,9 @@ def test_problems_ping_fail_and_go_to_telegram(configured):
 def test_failure_before_the_run_is_reported_without_db_password(configured):
     opener = Recorder()
     notify.report_failure(
-        "PostgreSQL: invalid dsn: postgresql://ozon:s3cret@127.0.0.1:5433/ozon "
-        "(password=s3cret)", opener=opener)
+        "PostgreSQL: invalid dsn: postgresql://ozon:s3cret@127.0.0.1:5433/ozon (password=s3cret)",
+        opener=opener,
+    )
 
     ping, message = opener.requests
     assert ping.full_url == "https://hc-ping.com/uuid/fail"
@@ -152,10 +155,18 @@ def test_failure_before_the_run_is_reported_without_db_password(configured):
 
 
 def test_failures_are_logged_without_secrets(configured):
-    body = io.BytesIO(json.dumps({"ok": False, "error_code": 400,
-                                  "description": "Bad Request: chat not found"}).encode())
-    error = urllib.error.HTTPError("https://api.telegram.org/bot" + TOKEN + "/sendMessage",
-                                   400, "Bad Request", email.message.Message(), body)
+    body = io.BytesIO(
+        json.dumps(
+            {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}
+        ).encode()
+    )
+    error = urllib.error.HTTPError(
+        "https://api.telegram.org/bot" + TOKEN + "/sendMessage",
+        400,
+        "Bad Request",
+        email.message.Message(),
+        body,
+    )
     opener = Recorder(fail_with=error)
     messages = Messages()
     notify.log.addHandler(messages)
@@ -181,14 +192,22 @@ class JsonResponse(Response):
 
 def test_find_chats_lists_who_wrote_to_the_bot(monkeypatch):
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", TOKEN)
-    updates = {"ok": True, "result": [
-        {"update_id": 1, "message": {"chat": {"id": 42, "type": "private",
-                                              "first_name": "Никита", "username": "nik"}}},
-        {"update_id": 2, "message": {"chat": {"id": 42, "type": "private",
-                                              "username": "nik"}}},
-        {"update_id": 3, "my_chat_member": {"chat": {"id": -100500, "type": "group",
-                                                     "title": "Цены Ozon"}}},
-    ]}
+    updates = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 1,
+                "message": {
+                    "chat": {"id": 42, "type": "private", "first_name": "Никита", "username": "nik"}
+                },
+            },
+            {"update_id": 2, "message": {"chat": {"id": 42, "type": "private", "username": "nik"}}},
+            {
+                "update_id": 3,
+                "my_chat_member": {"chat": {"id": -100500, "type": "group", "title": "Цены Ozon"}},
+            },
+        ],
+    }
     requests: list = []
 
     def opener(request, timeout):
@@ -234,8 +253,9 @@ def test_notify_command_finds_chat_id(monkeypatch, capsys):
 
 def test_notify_command_sends_test_message(monkeypatch, capsys, configured):
     sent: list = []
-    monkeypatch.setattr(notify, "send_telegram",
-                        lambda text, queue: sent.append((text, queue)) or True)
+    monkeypatch.setattr(
+        notify, "send_telegram", lambda text, queue: sent.append((text, queue)) or True
+    )
     code, out = run_notify_command(monkeypatch, capsys)
     assert code == 0 and "отправлено" in out
     # Проверочное сообщение в очередь не встаёт: результат виден сразу.
@@ -247,7 +267,7 @@ class Flaky(Recorder):
     """urlopen, где первые fail_times отправок в Telegram падают с ошибкой сети;
     пульс healthcheck проходит."""
 
-    def __init__(self, fail_times: int, error: Optional[Exception] = None):
+    def __init__(self, fail_times: int, error: Exception | None = None):
         super().__init__()
         self.fail_times = fail_times
         self.error = error or urllib.error.URLError(TimeoutError("timed out"))
@@ -269,20 +289,25 @@ def no_sleep(seconds):
     pytest.fail("промежуточное сообщение не должно ждать сеть")
 
 
-def test_unsent_message_waits_in_outbox_and_goes_first_next_time(configured, outbox,
-                                                                 monkeypatch):
+def test_unsent_message_waits_in_outbox_and_goes_first_next_time(configured, outbox, monkeypatch):
     """08.10.2026: без VPN сообщение о начале сбора пропало - теперь оно ждёт."""
     monkeypatch.setattr(notify, "_clock", lambda: 1_000_000.0)
-    notify.report_start(details=lambda: "К сбору 1200 из 1200 SKU panel",
-                        opener=Flaky(fail_times=1))
+    notify.report_start(
+        details=lambda: "К сбору 1200 из 1200 SKU panel", opener=Flaky(fail_times=1)
+    )
     (entry,) = json.loads(outbox.read_text(encoding="utf-8"))
     assert "начался ежедневный сбор" in entry["text"]
 
     # Через 2 ч связь есть: сначала задержанное (с пометкой), потом новое.
     monkeypatch.setattr(notify, "_clock", lambda: 1_000_000.0 + 7200)
     opener = Recorder()
-    notify.report_job(0, None, summary=lambda: "За сегодня собрано 1200 из 1200 SKU panel",
-                      opener=opener, sleep=no_sleep)
+    notify.report_job(
+        0,
+        None,
+        summary=lambda: "За сегодня собрано 1200 из 1200 SKU panel",
+        opener=opener,
+        sleep=no_sleep,
+    )
     late, result = telegram_texts(opener)
     assert late.startswith("⏳ Задержано: должно было прийти ")
     assert "начался ежедневный сбор" in late
@@ -301,8 +326,9 @@ def test_final_message_retries_while_network_is_down(configured, outbox):
 
 def test_final_message_stays_queued_after_all_retries(configured, outbox):
     slept: list = []
-    notify.report_failure("PostgreSQL: нет соединения", opener=Flaky(fail_times=99),
-                          sleep=slept.append)
+    notify.report_failure(
+        "PostgreSQL: нет соединения", opener=Flaky(fail_times=99), sleep=slept.append
+    )
     assert slept == list(notify.FINAL_RETRY_DELAYS)
     (entry,) = json.loads(outbox.read_text(encoding="utf-8"))
     assert "сбор не начался" in entry["text"]
@@ -310,6 +336,7 @@ def test_final_message_stays_queued_after_all_retries(configured, outbox):
 
 def test_final_message_survives_a_killed_process(configured, outbox):
     """10.10.2026: процесс прервали между повторами - итог не должен пропасть."""
+
     def killed(seconds):
         raise KeyboardInterrupt
 
@@ -321,15 +348,17 @@ def test_final_message_survives_a_killed_process(configured, outbox):
 
 def test_rejected_message_is_neither_retried_nor_queued(configured, outbox):
     """HTTP 4xx (неверный чат, токен) - повторять бессмысленно; очередь не застревает."""
-    error = urllib.error.HTTPError("https://api.telegram.org/", 400, "Bad Request",
-                                   email.message.Message(), None)
+    error = urllib.error.HTTPError(
+        "https://api.telegram.org/", 400, "Bad Request", email.message.Message(), None
+    )
     notify.report_job(0, None, opener=Recorder(fail_with=error), sleep=no_sleep)
     assert not outbox.exists()
 
 
 def test_telegram_overload_is_retried(configured, outbox):
-    error = urllib.error.HTTPError("https://api.telegram.org/", 429, "Too Many Requests",
-                                   email.message.Message(), None)
+    error = urllib.error.HTTPError(
+        "https://api.telegram.org/", 429, "Too Many Requests", email.message.Message(), None
+    )
     slept: list = []
     opener = Flaky(fail_times=1, error=error)
     notify.report_job(0, None, opener=opener, sleep=slept.append)
@@ -340,8 +369,10 @@ def test_outbox_drops_stale_and_extra_messages(configured, outbox, monkeypatch):
     now = 10_000_000.0
     monkeypatch.setattr(notify, "_clock", lambda: now)
     stale = {"created": now - notify.OUTBOX_MAX_AGE_SECONDS - 1, "text": "старое"}
-    fresh = [{"created": now - 60 + i, "text": "сообщение {}".format(i)}
-             for i in range(notify.OUTBOX_LIMIT)]
+    fresh = [
+        {"created": now - 60 + i, "text": "сообщение {}".format(i)}
+        for i in range(notify.OUTBOX_LIMIT)
+    ]
     outbox.write_text(json.dumps([stale, "мусор", *fresh]), encoding="utf-8")
     assert notify.load_outbox() == fresh
 
@@ -370,8 +401,9 @@ def test_network_failure_reason_is_logged(configured):
 
 
 def test_notify_command_delivers_queued_messages(monkeypatch, capsys, configured, outbox):
-    outbox.write_text(json.dumps([{"created": notify._clock() - 3600, "text": "итог"}]),
-                      encoding="utf-8")
+    outbox.write_text(
+        json.dumps([{"created": notify._clock() - 3600, "text": "итог"}]), encoding="utf-8"
+    )
     requests: list = []
 
     def opener(request, timeout):
@@ -379,10 +411,13 @@ def test_notify_command_delivers_queued_messages(monkeypatch, capsys, configured
         return Response()
 
     send = notify.send_telegram
-    monkeypatch.setattr(notify, "send_telegram",
-                        lambda text, queue: send(text, opener=opener, queue=queue))
+    monkeypatch.setattr(
+        notify, "send_telegram", lambda text, queue: send(text, opener=opener, queue=queue)
+    )
     code, out = run_notify_command(monkeypatch, capsys)
     assert code == 0 and "задержанные сообщения из очереди: 1" in out
     assert [sent_text(r).splitlines()[-1] for r in requests] == [
-        "итог", "✅ Price panel: оповещения настроены, бот на связи"]
+        "итог",
+        "✅ Price panel: оповещения настроены, бот на связи",
+    ]
     assert not outbox.exists()

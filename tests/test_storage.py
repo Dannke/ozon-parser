@@ -74,7 +74,7 @@ def test_postgres_ddl_covers_fields():
 def test_clickhouse_ddl_matches_order():
     """Порядок колонок в ClickHouse совпадает с порядком вставки."""
     columns = _columns_from_ddl(storage.CH_DDL)
-    assert columns[:len(storage.DB_FIELDS)] == list(storage.DB_FIELDS), columns
+    assert columns[: len(storage.DB_FIELDS)] == list(storage.DB_FIELDS), columns
 
 
 def test_upsert_is_idempotent_by_day():
@@ -94,7 +94,7 @@ def test_db_rows_values_in_order():
     row = storage._db_rows([SAMPLE], date)[0]
 
     assert len(row) == len(storage.DB_FIELDS)
-    values = dict(zip(storage.DB_FIELDS, row))
+    values = dict(zip(storage.DB_FIELDS, row, strict=True))
     assert values["sku"] == "2359066702"
     assert values["parsed_date"] == date
     assert values["price"] == 1759.0
@@ -157,8 +157,8 @@ def test_source_column_lives_in_db_only():
     assert "source" in storage.DB_FIELDS
     assert "source" not in FIELDS
 
-    row = dict(zip(storage.DB_FIELDS,
-                   storage._db_rows([dict(SAMPLE, source="html")], dt.date(2026, 9, 23))[0]))
+    values = storage._db_rows([dict(SAMPLE, source="html")], dt.date(2026, 9, 23))[0]
+    row = dict(zip(storage.DB_FIELDS, values, strict=True))
     assert row["source"] == "html"
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -195,6 +195,7 @@ def test_database_failure_still_writes_csv(monkeypatch):
     Регрессия: исключение из save_postgres вылетало до записи CSV, хотя CSV и
     задуман страховкой на случай недоступной базы.
     """
+
     def database_down(*args, **kwargs):
         raise storage.StorageError("Ошибка PostgreSQL: connection refused")
 
@@ -220,4 +221,3 @@ def test_csv_failure_is_fatal_when_csv_is_the_only_backend():
         except storage.StorageError:
             return
     raise AssertionError("ошибка записи CSV должна была подняться наверх")
-
