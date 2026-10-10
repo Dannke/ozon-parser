@@ -38,7 +38,7 @@ dev = [
 # ozon-* - точки входа старого сценария (только Ozon), имена сохранены.
 [project.scripts]
 price-panel = "price_panel.__main__:main"
-ozon-parse = "price_panel.marketplaces.ozon.parse:main"
+ozon-parse = "price_panel.legacy.runner:main"
 ozon-login = "price_panel.marketplaces.ozon.login:main"
 ozon-check = "price_panel.legacy.check:main"
 
@@ -74,12 +74,6 @@ source_modules = [
     "price_panel.app",
 ]
 forbidden_modules = ["price_panel.legacy"]
-ignore_imports = [
-    # Долг: парсер Ozon сам пишет CSV и таблицу старого сценария. Уходит, когда
-    # цикл сбора переедет в ядро, а сохранение - в legacy (см. план, Phase 4b).
-    "price_panel.marketplaces.ozon.parse -> price_panel.legacy.cli",
-    "price_panel.marketplaces.ozon.parse -> price_panel.legacy.storage",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -19,14 +19,12 @@ has_rich_content заведомо пусты. В CSV её нет - там ров
 
 from __future__ import annotations
 
-import contextlib
-import csv
 import datetime as dt
-import os
 from collections.abc import Sequence
 from pathlib import Path
 
 from price_panel.infra import config, db
+from price_panel.infra.csv_file import write_csv
 from price_panel.infra.logger import get_logger
 from price_panel.marketplaces.ozon.extract import FIELDS
 
@@ -63,27 +61,13 @@ def save_csv(rows: Sequence[dict], path: Path) -> None:
 
     Пустой результат тоже записывается, одним заголовком: иначе на месте
     остался бы снимок прошлого запуска, и check_snapshot.py принял бы его
-    за сегодняшний.
-
-    Пишем во временный файл и подменяем через os.replace, чтобы обрыв посреди
-    записи не оставил обрезанный, но внешне валидный CSV.
+    за сегодняшний. Запись атомарная (infra.csv_file).
     """
     if not rows:
         log.warning("Список товаров пуст - пишу CSV с одним заголовком")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
     try:
-        with tmp_path.open("w", newline="", encoding="utf-8-sig") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(FIELDS), extrasaction="ignore")
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({field: row.get(field) for field in FIELDS})
-        os.replace(tmp_path, path)
+        write_csv(rows, path, FIELDS)
     except OSError as exc:
-        # Сообщаем об ошибке записи CSV; неудача уборки временного файла - мелочь.
-        with contextlib.suppress(OSError):
-            tmp_path.unlink(missing_ok=True)
         raise StorageError("Не удалось записать CSV {}: {}".format(path, exc)) from exc
 
     log.info("Сохранено строк в CSV: %s -> %s", len(rows), path)

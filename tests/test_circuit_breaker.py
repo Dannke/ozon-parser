@@ -3,8 +3,8 @@
 Повод - прогон 30.09.2026 в Docker: Ozon 5 часов отвечал 403 на каждый товар,
 а парсер честно делал по 3 попытки на каждый из 957 SKU.
 
-Работает настоящий цикл parse_in_browser и run(); подменены только браузер
-(Playwright) и разбор одного SKU.
+Работает настоящий цикл ядра (core.collect) с адаптером Ozon; подменены только
+браузер (Playwright) и разбор одного SKU.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from typing import cast
 import pytest
 from playwright.sync_api import Page
 
+from price_panel.core.collect import RunObserver, collect
+from price_panel.core.models import SkuOutcome
 from price_panel.infra import config
-from price_panel.legacy import storage
 from price_panel.marketplaces.ozon import parse, session
-from price_panel.marketplaces.ozon.parse import SkuOutcome
 
 
 class FakePage:
@@ -42,7 +42,7 @@ class FakeBrowser:
         pass
 
 
-class Recorder(parse.RunObserver):
+class Recorder(RunObserver):
     def __init__(self):
         self.done: list = []
         self.failed: list = []
@@ -58,7 +58,6 @@ class Recorder(parse.RunObserver):
 def scripted(monkeypatch):
     """Подменяет браузер; возвращает функцию, задающую итоги SKU по сценарию."""
     monkeypatch.setattr(session, "load_session", lambda path: {"cookies": []})
-    monkeypatch.setattr(storage, "save", lambda rows, **kwargs: None)
     monkeypatch.setattr(parse, "sync_playwright", contextlib.nullcontext)
     monkeypatch.setattr(parse.browser_utils, "launch", lambda playwright: FakeBrowser())
     monkeypatch.setattr(
@@ -88,10 +87,15 @@ def skus(count):
     return [str(n) for n in range(1, count + 1)]
 
 
+def run(count, observer):
+    """Сбор count SKU адаптером Ozon с предохранителем из .env."""
+    return collect(parse.OzonAdapter(), skus(count), observer, parse.breaker(), parse.log)
+
+
 def test_series_of_failures_stops_the_run(scripted):
     calls = scripted({"1": "ok"})
     observer = Recorder()
-    assert parse.run(skus(10), batch_size=0, observer=observer) == 1
+    assert run(10, observer).blocked
 
     assert calls == ["1", "2", "3", "4", "5"], "после 4 отказов подряд новых SKU не берём"
     assert observer.done == ["1"]
@@ -103,7 +107,7 @@ def test_success_and_not_found_break_the_series(scripted):
     results = {"4": "not_found", "8": "ok"}
     calls = scripted(results)
     observer = Recorder()
-    parse.run(skus(11), batch_size=0, observer=observer)
+    run(11, observer)
 
     assert len(calls) == 11
     assert not any(t == "blocked" for _, t in observer.failed)
@@ -112,7 +116,7 @@ def test_success_and_not_found_break_the_series(scripted):
 def test_zero_disables_the_breaker(scripted, monkeypatch):
     calls = scripted({})
     monkeypatch.setattr(config, "MAX_CONSECUTIVE_FAILURES", 0)
-    parse.run(skus(12), batch_size=0, observer=Recorder())
+    run(12, Recorder())
     assert len(calls) == 12
 
 
@@ -120,7 +124,7 @@ def test_failed_antibot_checks_stop_the_run_sooner(scripted):
     """Непройденная антибот-проверка - явная блокировка: порог меньше (2, а не 4)."""
     calls = scripted({"1": "ok", "2": "antibot", "3": "antibot"})
     observer = Recorder()
-    assert parse.run(skus(10), batch_size=0, observer=observer) == 1
+    assert run(10, observer).blocked
     assert calls == ["1", "2", "3"]
     assert [t for _, t in observer.failed] == ["antibot"] * 2 + ["blocked"] * 7
 
@@ -138,7 +142,7 @@ def test_antibot_series_is_broken_by_other_outcomes(scripted):
     }
     calls = scripted(results)
     observer = Recorder()
-    parse.run(skus(6), batch_size=0, observer=observer)
+    run(6, observer)
     assert len(calls) == 6
     assert not any(t == "blocked" for _, t in observer.failed)
 
@@ -180,5 +184,5 @@ def test_blocked_run_is_not_restarted_in_a_new_browser(scripted, monkeypatch):
     )
     monkeypatch.setattr(config, "MAX_BROWSER_RESTARTS", 2)
     scripted({})
-    parse.run(skus(10), batch_size=0, observer=Recorder())
+    run(10, Recorder())
     assert len(launches) == 1

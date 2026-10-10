@@ -1,7 +1,7 @@
 """Учёт прогона по panel: parse_runs, история, ошибки по SKU.
 
-Браузер и база не нужны: parse_in_browser подменяется сценарием, который
-отдаёт итоги SKU через RunProgress.notify, а Warehouse - объектом в памяти.
+Браузер и база не нужны: адаптер маркетплейса подменяется сценарием итогов
+SKU, а Warehouse - объектом в памяти. Учёт прогона от Ozon не зависит.
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ import pytest
 
 from price_panel.app import pipeline
 from price_panel.app.settings import parse_settings
+from price_panel.core.models import SkuOutcome
 from price_panel.infra import config
 from price_panel.infra.db import DatabaseError
+from price_panel.infra.skus import read_skus_file
 from price_panel.infra.warehouse import Warehouse
 from price_panel.legacy import storage
-from price_panel.marketplaces.ozon import parse, session
-from price_panel.marketplaces.ozon.parse import SkuOutcome
+from price_panel.marketplaces.ozon import session
 
 SETTINGS_DATA = {
     "discovery": {
@@ -89,27 +90,33 @@ class FakeWarehouse(Warehouse):
         return set(self.without_details)
 
 
-def scripted_browser(results: dict, seen_options: list | None = None):
-    """parse_in_browser, который отдаёт заранее заданные итоги SKU."""
+def scripted(monkeypatch, results: dict | None = None, stop: str | None = None) -> list:
+    """Подменяет адаптер Ozon сценарием итогов; возвращает параметры, с которыми его создали.
 
-    def run_session(progress, state, total, flush_batch):
-        if seen_options is not None:
-            seen_options.append(progress.options)
-        while progress.pending:
-            sku = progress.pending.pop(0)
-            kind = results.get(sku, "ok")
-            if kind == "ok":
-                outcome = SkuOutcome(
-                    sku=sku, product={"sku": sku, "title": "t", "price": 1.0}, attempts=1
-                )
-                progress.rows.append(outcome.product)
-            else:
-                outcome = SkuOutcome(sku=sku, error_type=kind, error_message="fail", attempts=3)
-                progress.failed.append(sku)
-            progress.notify(outcome, 2.0)
-            flush_batch()
+    :param stop: адаптер останавливается сразу с этой причиной (браузер падал).
+    """
+    created: list = []
 
-    return run_session
+    class Adapter:
+        def __init__(self, options=None):
+            created.append(options)
+
+        def collect(self, skus):
+            if stop:
+                return stop
+            for sku in skus:
+                kind = (results or {}).get(sku, "ok")
+                if kind == "ok":
+                    product = {"sku": sku, "title": "t", "price": 1.0}
+                    yield SkuOutcome(sku=sku, product=product, attempts=1, seconds=2.0)
+                else:
+                    yield SkuOutcome(
+                        sku=sku, error_type=kind, error_message="fail", attempts=3, seconds=2.0
+                    )
+            return None
+
+    monkeypatch.setattr(pipeline.parse, "OzonAdapter", Adapter)
+    return created
 
 
 @pytest.fixture(autouse=True)
@@ -122,9 +129,7 @@ def no_side_effects(monkeypatch):
 
 
 def test_every_sku_ends_up_in_history_or_errors(monkeypatch):
-    monkeypatch.setattr(
-        parse, "parse_in_browser", scripted_browser({"2": "not_found", "3": "fetch_error"})
-    )
+    scripted(monkeypatch, {"2": "not_found", "3": "fetch_error"})
     wh = FakeWarehouse()
     report = pipeline.run_parse(wh, ["1", "2", "3", "4"], SETTINGS)
 
@@ -139,18 +144,16 @@ def test_every_sku_ends_up_in_history_or_errors(monkeypatch):
 
 
 def test_storage_failure_is_an_error_not_a_success(monkeypatch):
-    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}))
+    scripted(monkeypatch)
     wh = FakeWarehouse(broken_skus={"2"})
     report = pipeline.run_parse(wh, ["1", "2"], SETTINGS)
     assert report.success == 1
     assert wh.errors == [("2", "storage_error")]
 
 
-def test_crashed_browser_leaves_skus_as_not_processed(monkeypatch):
-    def always_crash(progress, state, total, flush_batch):
-        raise parse.BrowserGone("Target page, context or browser has been closed")
-
-    monkeypatch.setattr(parse, "parse_in_browser", always_crash)
+def test_skus_the_adapter_never_reached_are_not_processed(monkeypatch):
+    """Адаптер остановился раньше (браузер падал) - SKU в учёте, а не потеряны."""
+    scripted(monkeypatch, stop="браузер падал, до SKU не дошла очередь")
     wh = FakeWarehouse()
     report = pipeline.run_parse(wh, ["1", "2"], SETTINGS)
 
@@ -162,16 +165,14 @@ def test_crashed_browser_leaves_skus_as_not_processed(monkeypatch):
 
 def test_blocked_run_has_its_own_exit_code(monkeypatch):
     """Планировщик по коду выхода решает, повторять ли прогон позже."""
-    monkeypatch.setattr(
-        parse, "parse_in_browser", scripted_browser({"2": "antibot", "3": "blocked"})
-    )
+    scripted(monkeypatch, {"2": "antibot", "3": "blocked"})
     report = pipeline.run_parse(FakeWarehouse(), ["1", "2", "3"], SETTINGS)
     assert report.status == "blocked"
     assert report.exit_code == pipeline.EXIT_BLOCKED != 1
 
 
 def test_broken_session_is_visible_in_run_accounting(monkeypatch):
-    """parse.run выходит сразу, но SKU не пропадают из учёта молча.
+    """Адаптер Ozon останавливается сразу, но SKU не пропадают из учёта молча.
 
     Отсутствие файла сессии - не ошибка (карточки открываются без входа), а
     повреждённый файл (например, каталог вместо него от Docker) - ошибка.
@@ -187,10 +188,9 @@ def test_broken_session_is_visible_in_run_accounting(monkeypatch):
     assert report.status == "failed"
 
 
-def test_parser_settings_reach_the_browser_loop(monkeypatch):
-    """price_source и расписание описаний из config.yaml доходят до разбора SKU."""
-    seen: list = []
-    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}, seen))
+def test_parser_settings_reach_the_adapter(monkeypatch):
+    """price_source и расписание описаний из config.yaml доходят до адаптера Ozon."""
+    seen = scripted(monkeypatch)
     settings = parse_settings(
         {
             "discovery": SETTINGS_DATA["discovery"],
@@ -234,10 +234,21 @@ def test_second_parallel_run_is_refused():
 
 
 def test_csv_export_can_be_disabled(monkeypatch, no_side_effects):
-    """Без csv_export прогон не трогает data/products.csv старого сценария."""
-    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}))
+    """Без csv_export прогон не трогает CSV и хранилища старого сценария."""
+    scripted(monkeypatch)
     pipeline.run_parse(FakeWarehouse(), ["1"], SETTINGS)
-    assert set(no_side_effects) == {"none"}
+    assert no_side_effects == []
+
+
+def test_csv_export_writes_the_panel_snapshot(monkeypatch, tmp_path):
+    """csv_export - снимок прогона в CSV: 12 полей, все успешные SKU."""
+    scripted(monkeypatch, {"2": "fetch_error"})
+    path = tmp_path / "panel_products.csv"
+    settings = parse_settings(dict(SETTINGS_DATA, parser={"csv_export": str(path)}))
+    pipeline.run_parse(FakeWarehouse(), ["1", "2", "3"], settings)
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0].startswith("sku,title,price")
+    assert [line.split(",")[0] for line in lines[1:]] == ["1", "3"]
 
 
 def test_storage_none_backend_writes_nothing():
@@ -268,9 +279,9 @@ def test_panel_csv_with_header_is_read_by_legacy_reader():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "panel.csv"
         path.write_text("﻿sku\n111111\n222222\n111111\n", encoding="utf-8")
-        assert parse.read_skus_file(path) == ["111111", "222222"]
+        assert read_skus_file(path) == ["111111", "222222"]
         path.write_text("sku,category\n111111,phones\n", encoding="utf-8")
-        assert parse.read_skus_file(path) == ["111111"]
+        assert read_skus_file(path) == ["111111"]
 
 
 class QueueWarehouse(FakeWarehouse):
@@ -299,7 +310,7 @@ def run_cli(monkeypatch, wh, *argv):
 
     monkeypatch.setattr(cli, "Warehouse", lambda: wh)
     monkeypatch.setattr(cli, "load_settings", lambda path: SETTINGS)
-    monkeypatch.setattr(parse, "parse_in_browser", scripted_browser({}))
+    scripted(monkeypatch)
     return cli.main(["parse", *argv])
 
 

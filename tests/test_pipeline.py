@@ -27,6 +27,7 @@ from playwright.sync_api import sync_playwright
 from test_extract import FIXTURE, card_html
 
 from price_panel.infra import browser as browser_utils
+from price_panel.infra.skus import read_skus_file, select_range
 from price_panel.legacy import storage
 from price_panel.marketplaces.ozon import extract, login, parse, session
 
@@ -223,7 +224,7 @@ def test_read_skus_file_skips_comments_and_duplicates():
             "2359066702\n",
             encoding="utf-8",
         )
-        assert parse.read_skus_file(path) == ["2359066702", "2829800382"]
+        assert read_skus_file(path) == ["2359066702", "2829800382"]
 
 
 def test_select_range_splits_long_list():
@@ -233,13 +234,13 @@ def test_select_range_splits_long_list():
     поэтому список должен делиться без правки файла.
     """
     skus = [str(number) for number in range(10)]
-    assert parse.select_range(skus) == skus
-    assert parse.select_range(skus, offset=3) == skus[3:]
-    assert parse.select_range(skus, limit=4) == skus[:4]
-    assert parse.select_range(skus, offset=8, limit=5) == ["8", "9"]
-    assert parse.select_range(skus, offset=20) == []
+    assert select_range(skus) == skus
+    assert select_range(skus, offset=3) == skus[3:]
+    assert select_range(skus, limit=4) == skus[:4]
+    assert select_range(skus, offset=8, limit=5) == ["8", "9"]
+    assert select_range(skus, offset=20) == []
     # Отрицательный offset не должен резать список с конца.
-    assert parse.select_range(skus, offset=-3) == skus
+    assert select_range(skus, offset=-3) == skus
 
 
 def test_national_number_drops_country_code():
