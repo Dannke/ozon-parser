@@ -1,15 +1,16 @@
-"""Прогон списка SKU целиком: перезапуск упавшего браузера и итоговый статус.
+"""Старый сценарий целиком: перезапуск упавшего браузера, партии, итоговый статус.
 
-Браузер здесь не нужен: parse_in_browser подменяется сценарием, который
-обрабатывает SKU и «падает» в заданный момент.
+Браузер здесь не нужен: сессия браузера адаптера Ozon (parse.browser_session)
+подменяется сценарием, который отдаёт итоги SKU и «падает» в заданный момент.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from price_panel.core.models import SkuOutcome
 from price_panel.infra import config
-from price_panel.legacy import storage
+from price_panel.legacy import runner, storage
 from price_panel.marketplaces.ozon import parse, session
 
 
@@ -24,19 +25,18 @@ def saved(monkeypatch):
 
 
 def fake_browser(crash_on: set):
-    """parse_in_browser, который падает, дойдя до SKU из crash_on (один раз на SKU)."""
+    """Сессия браузера, которая падает, дойдя до SKU из crash_on (один раз на SKU)."""
     launches: list = []
 
-    def run_session(progress, state, total, flush_batch):
-        launches.append(list(progress.pending))
-        while progress.pending:
-            sku = progress.pending[0]
+    def run_session(pending, state, total, options):
+        launches.append(list(pending))
+        while pending:
+            sku = pending[0]
             if sku in crash_on:
                 crash_on.discard(sku)
                 raise parse.BrowserGone("Target page, context or browser has been closed")
-            progress.pending.pop(0)
-            progress.rows.append({"sku": sku, "title": "товар " + sku})
-            flush_batch()
+            pending.pop(0)
+            yield SkuOutcome(sku=sku, product={"sku": sku, "title": "товар " + sku}, attempts=1)
 
     return run_session, launches
 
@@ -44,9 +44,9 @@ def fake_browser(crash_on: set):
 def test_crashed_browser_is_restarted_and_sku_retried(monkeypatch, saved):
     """SKU, на котором упал браузер, обрабатывается заново в новом браузере."""
     run_session, launches = fake_browser(crash_on={"2"})
-    monkeypatch.setattr(parse, "parse_in_browser", run_session)
+    monkeypatch.setattr(parse, "browser_session", run_session)
 
-    assert parse.run(["1", "2", "3"], batch_size=0) == 0
+    assert runner.run(["1", "2", "3"], batch_size=0) == 0
     assert launches == [["1", "2", "3"], ["2", "3"]]
     assert [row["sku"] for row in saved[-1]] == ["1", "2", "3"]
 
@@ -54,20 +54,20 @@ def test_crashed_browser_is_restarted_and_sku_retried(monkeypatch, saved):
 def test_restarts_are_limited(monkeypatch, saved):
     """Браузер, который падает раз за разом, не перезапускается бесконечно."""
 
-    def always_crash(progress, state, total, flush_batch):
+    def always_crash(pending, state, total, options):
         raise RuntimeError("Connection closed while reading from the driver")
 
-    monkeypatch.setattr(parse, "parse_in_browser", always_crash)
-    assert parse.run(["1", "2"], batch_size=0) == 1
+    monkeypatch.setattr(parse, "browser_session", always_crash)
+    assert runner.run(["1", "2"], batch_size=0) == 1
     assert saved[-1] == []  # пустой срез всё равно записан поверх старого
 
 
 def test_success_rate_counts_unprocessed_skus(monkeypatch, saved):
     """SKU, до которых не дошла очередь, - неудача, а не «не считаются»."""
     run_session, _ = fake_browser(crash_on={"2"})
-    monkeypatch.setattr(parse, "parse_in_browser", run_session)
+    monkeypatch.setattr(parse, "browser_session", run_session)
     monkeypatch.setattr(config, "MAX_BROWSER_RESTARTS", 0)
-    assert parse.run(["1", "2", "3", "4"], batch_size=0, min_success_rate=0.5) == 1
+    assert runner.run(["1", "2", "3", "4"], batch_size=0, min_success_rate=0.5) == 1
     assert [row["sku"] for row in saved[-1]] == ["1"]
 
 
@@ -95,7 +95,7 @@ def test_pages_open_no_faster_than_page_interval(monkeypatch, interval, since_la
 def test_batches_are_flushed_during_run(monkeypatch, saved):
     """Промежуточные сохранения идут по ходу прогона, а не только в конце."""
     run_session, _ = fake_browser(crash_on=set())
-    monkeypatch.setattr(parse, "parse_in_browser", run_session)
+    monkeypatch.setattr(parse, "browser_session", run_session)
 
-    assert parse.run(["1", "2", "3", "4", "5"], batch_size=2) == 0
+    assert runner.run(["1", "2", "3", "4", "5"], batch_size=2) == 0
     assert [len(rows) for rows in saved] == [2, 4, 5]

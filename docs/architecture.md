@@ -42,10 +42,26 @@
 Парсер можно запустить и по обычному файлу со списком SKU, а discovery ничего
 не знает о разборе карточек.
 
-Парсер карточек один на оба сценария: `parse.run()` вызывают и старый
-`parse_ozon.py` (CSV / `ozon_products`), и конвейер. Конвейер подключается к
-нему через хуки `RunObserver`: итог каждого SKU пишется в PostgreSQL сразу
-после разбора, до перехода к следующему.
+Цикл сбора один на оба сценария и на все маркетплейсы — `core.collect`.
+Адаптер маркетплейса (сейчас `OzonAdapter`) отдаёт итог каждого SKU сразу после
+разбора, а сам отвечает за транспорт: браузер, прогрев, перезапуски, темп. Ядро
+передаёт итог наблюдателю (`RunObserver`) и следит за серией отказов
+(предохранитель). Наблюдатель решает, куда писать:
+
+- конвейер — `WarehouseObserver`: SKU пишется в PostgreSQL до перехода к
+  следующему, плюс снимок прогона в CSV (`parser.csv_export`);
+- старый сценарий `parse_ozon.py` — партии в CSV / `ozon_products`
+  (`legacy/runner.py`).
+
+```text
+ OzonAdapter.collect ──SkuOutcome──▶ core.collect ──▶ RunObserver ──▶ PostgreSQL / CSV
+   браузер, прогрев,                   предохранитель,
+   перезапуски, темп                   недошедшие SKU, Ctrl+C
+```
+
+Ядро может остановить сбор в любой момент: закрытие генератора адаптера
+закрывает и браузер. Почему контракт устроен так — в
+[ADR 0003](adr/0003-marketplace-adapter.md).
 
 ## Компоненты
 
@@ -65,8 +81,6 @@
 ```
 
 Конвейер (`core`, `infra`, `marketplaces`, `app`) не импортирует `legacy`.
-Исключение — долг до выделения общего цикла сбора в ядро: парсер Ozon пока сам
-сохраняет CSV и таблицу старого сценария (`ignore_imports` в контракте).
 Почему один пакет со слоями, а не отдельные проекты, — в
 [ADR 0001](adr/0001-modular-monolith.md).
 
@@ -80,7 +94,7 @@
 | `price_panel/app/discovery.py` | Discovery: листинг ozon.ru и data.ozon.ru, отбор в panel |
 | `price_panel/app/scheduler.py` | Ежедневный прогон: `schedule --once` и цикл для контейнера |
 | `price_panel/app/settings.py` | Чтение и проверка `config.yaml` |
-| `price_panel/marketplaces/ozon/parse.py` | Обход списка SKU, повторы, перезапуск браузера, предохранитель, батчи |
+| `price_panel/marketplaces/ozon/parse.py` | Разбор карточки (API, HTML), повторы SKU; `OzonAdapter`: браузер, прогрев, перезапуски, темп |
 | `price_panel/marketplaces/ozon/extract.py` | Разбор JSON карточки (из API и из HTML) в поля — без сети |
 | `price_panel/marketplaces/ozon/login.py` | Вход через Ozon ID (по почте или телефону) + код из Gmail |
 | `price_panel/marketplaces/ozon/gmail.py` | Чтение кода подтверждения через Gmail API |
@@ -95,8 +109,12 @@
 | `price_panel/infra/db.py` | Подключения к БД и проверка имён таблиц |
 | `price_panel/infra/logger.py` | Логирование в консоль и в `logs/*.log` с ротацией |
 | `price_panel/infra/secrets_fs.py` | Запись файлов с секретами с правами только для владельца |
-| `price_panel/core/models.py` | Понятия, общие для слоёв: код выхода «прогон остановлен блокировкой» |
+| `price_panel/infra/csv_file.py` | Атомарная запись CSV (общая для конвейера и старого сценария) |
+| `price_panel/infra/skus.py` | Списки SKU на входе: чтение файла, нарезка `--offset` / `--limit` |
+| `price_panel/core/models.py` | Понятия, общие для слоёв: итог SKU (`SkuOutcome`), код выхода «прогон остановлен блокировкой» |
+| `price_panel/core/collect.py` | Цикл сбора: контракт адаптера, наблюдатели, предохранитель, партии записей |
 | `price_panel/core/sampling.py` | SKU из URL, дедупликация, выборка top + tail — без сети |
+| `price_panel/legacy/runner.py` | Старый сценарий `parse_ozon.py`: адаптер Ozon + партии в хранилище, код возврата по доле успеха |
 | `price_panel/legacy/storage.py` | Старый сценарий: CSV / таблица PostgreSQL / ClickHouse |
 | `price_panel/legacy/check.py` | Проверка среза за дату |
 | `price_panel/legacy/cli.py` | Общие аргументы командной строки старого сценария |

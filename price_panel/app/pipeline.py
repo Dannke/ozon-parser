@@ -1,7 +1,7 @@
 """Прогон парсера по sku_panel (или файлу) с записью в PostgreSQL.
 
-Парсер карточек не меняется: это тот же parse.run(), что и у parse_ozon.py.
-Здесь к нему добавляется учёт запуска:
+Карточки собирает адаптер Ozon, цикл - ядро (core.collect), как и у
+parse_ozon.py. Здесь к нему добавляется учёт запуска:
 
     parse_runs     - запуск: когда, сколько SKU, сколько успешно, скорость;
     products       - последние атрибуты карточки;
@@ -21,14 +21,18 @@ import statistics
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from price_panel.app.settings import Settings
+from price_panel.core.collect import Observers, RowBatches, RunObserver, collect
 from price_panel.core.models import EXIT_BLOCKED
 from price_panel.infra import config
+from price_panel.infra.csv_file import write_csv
 from price_panel.infra.db import DatabaseError
 from price_panel.infra.logger import get_logger
 from price_panel.infra.warehouse import Warehouse
 from price_panel.marketplaces.ozon import parse
+from price_panel.marketplaces.ozon.extract import FIELDS
 
 log = get_logger("pipeline")
 
@@ -41,7 +45,7 @@ class ParseLockBusy(RuntimeError):
     """Уже идёт другой прогон парсера."""
 
 
-class WarehouseObserver(parse.RunObserver):
+class WarehouseObserver(RunObserver):
     """Пишет итог каждого SKU в PostgreSQL и ведёт счётчики прогона."""
 
     def __init__(self, wh: Warehouse, run_id: int):
@@ -168,6 +172,24 @@ def details_schedule(
     )
 
 
+def csv_export(path: Path) -> RowBatches:
+    """Снимок прогона panel в CSV (parser.csv_export) - артефакт для глазной проверки.
+
+    Сбой записи не останавливает прогон: основное хранилище - PostgreSQL.
+    """
+
+    def save(rows: list) -> bool:
+        try:
+            write_csv(rows, path, FIELDS)
+        except OSError as exc:
+            log.error("CSV %s не записан: %s", path, exc)
+            return False
+        log.info("Сохранено строк в CSV: %s -> %s", len(rows), path)
+        return True
+
+    return RowBatches(save, config.BATCH_SIZE)
+
+
 def run_parse(
     wh: Warehouse, skus: list, settings: Settings, kind: str = "manual", sku_source: str = "panel"
 ) -> ParseReport:
@@ -201,14 +223,17 @@ def run_parse(
     )
 
     started = time.monotonic()
+    export = csv_export(csv_path) if csv_path else None
     try:
-        parse.run(
+        collect(
+            parse.OzonAdapter(options),
             skus,
-            storage_backend="csv" if csv_path else "none",
-            output=csv_path,
-            observer=observer,
-            options=options,
+            Observers(observer, export) if export else observer,
+            parse.breaker(),
+            parse.log,
         )
+        if export:
+            export.flush()
     finally:
         # SKU, о которых парсер не отчитался (не открылась сессия, программная
         # ошибка), тоже должны остаться в учёте, а не пропасть молча.

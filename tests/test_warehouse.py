@@ -18,8 +18,8 @@ import pytest
 
 from price_panel.core.sampling import GROUP_TAIL, GROUP_TOP, Candidate, PanelPick
 from price_panel.infra import warehouse
+from price_panel.infra.skus import read_skus_file
 from price_panel.infra.warehouse import Warehouse
-from price_panel.marketplaces.ozon import parse
 
 TEST_DSN = os.getenv("TEST_PG_DSN", "")
 
@@ -301,4 +301,4 @@ def test_exported_panel_is_readable_by_legacy_parser(wh):
         path = Path(tmp) / "panel_skus.csv"
         assert wh.export_panel_csv(path) == 2
         assert path.read_text(encoding="utf-8").splitlines()[0] == "sku"
-        assert sorted(parse.read_skus_file(path)) == ["111111", "222222"]
+        assert sorted(read_skus_file(path)) == ["111111", "222222"]
