@@ -85,8 +85,7 @@ def count_clickhouse(snapshot_date: dt.date) -> int:
         raise CheckError(str(exc)) from exc
 
 
-def run(snapshot_date: dt.date | None = None, backend: str = "",
-        min_rows: int = 1) -> int:
+def run(snapshot_date: dt.date | None = None, backend: str = "", min_rows: int = 1) -> int:
     """Проверяет наличие данных. Возвращает код возврата процесса."""
     snapshot_date = snapshot_date or dt.date.today()
     backend = (backend or config.STORAGE).lower()
@@ -107,8 +106,12 @@ def run(snapshot_date: dt.date | None = None, backend: str = "",
 
     where = "{} за {}".format(backend, snapshot_date)
     if count < min_rows:
-        log.error("%s: строк %s, ожидалось хотя бы %s - парсер отработал вхолостую",
-                  where, count, min_rows)
+        log.error(
+            "%s: строк %s, ожидалось хотя бы %s - парсер отработал вхолостую",
+            where,
+            count,
+            min_rows,
+        )
         return 1
 
     log.info("%s: строк %s - данные на месте", where, count)
@@ -118,8 +121,9 @@ def run(snapshot_date: dt.date | None = None, backend: str = "",
 def main() -> int:
     parser = argparse.ArgumentParser(description="Проверка среза данных за дату")
     cli.add_storage_arguments(parser, storage_help="где проверять (по умолчанию из .env)")
-    parser.add_argument("--min-rows", type=int, default=1,
-                        help="минимальное количество строк (по умолчанию 1)")
+    parser.add_argument(
+        "--min-rows", type=int, default=1, help="минимальное количество строк (по умолчанию 1)"
+    )
     args = parser.parse_args()
 
     try:

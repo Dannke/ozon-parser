@@ -15,12 +15,19 @@ VALID = {
         "seed": "s",
         "top_ratio": 0.4,
         "categories": [
-            {"name": "phones", "url": "https://www.ozon.ru/category/smartfony-15502/",
-             "panel_size": 10},
-            {"name": "cases", "url": "https://www.ozon.ru/category/chehly-15892/",
-             "panel_size": 7, "top_ratio": 0.5, "tail_max_page": 50},
-            {"name": "best", "source": "data_ozon", "category_ids": ["95139"],
-             "panel_size": 5},
+            {
+                "name": "phones",
+                "url": "https://www.ozon.ru/category/smartfony-15502/",
+                "panel_size": 10,
+            },
+            {
+                "name": "cases",
+                "url": "https://www.ozon.ru/category/chehly-15892/",
+                "panel_size": 7,
+                "top_ratio": 0.5,
+                "tail_max_page": 50,
+            },
+            {"name": "best", "source": "data_ozon", "category_ids": ["95139"], "panel_size": 5},
         ],
     },
     "schedule": {"daily_at": "06:15", "timezone": "Europe/Moscow"},
@@ -39,9 +46,9 @@ def test_sizes_and_overrides():
     settings = parse_settings(VALID)
     phones, cases, best = settings.discovery.categories
     assert (phones.top_size, phones.tail_size) == (4, 6)
-    assert (cases.top_size, cases.tail_size) == (4, 3)   # round(3.5) == 4
+    assert (cases.top_size, cases.tail_size) == (4, 3)  # round(3.5) == 4
     assert cases.tail_max_page == 50
-    assert phones.tail_max_page == 300                   # значение по умолчанию
+    assert phones.tail_max_page == 300  # значение по умолчанию
     assert phones.listing_path == "/category/smartfony-15502/"
     assert best.category_ids == ("95139",)
     assert settings.schedule.daily_at == dt.time(6, 15)
@@ -54,15 +61,18 @@ def mutate(**changes):
     return data
 
 
-@pytest.mark.parametrize("data, message", [
-    (mutate(url="https://www.ozon.ru/search/?text=phone"), "url"),
-    (mutate(name="Smart Phones"), "Имя категории"),
-    (mutate(panel_size=0), "panel_size"),
-    (mutate(source="wildberries"), "source"),
-    (mutate(top_ratio=1.5), "top_ratio"),
-    (mutate(top_ratio=0.4, tail_ratio=0.5), "должны давать 1"),
-    (mutate(name="cases"), "повторяются"),
-])
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        (mutate(url="https://www.ozon.ru/search/?text=phone"), "url"),
+        (mutate(name="Smart Phones"), "Имя категории"),
+        (mutate(panel_size=0), "panel_size"),
+        (mutate(source="wildberries"), "source"),
+        (mutate(top_ratio=1.5), "top_ratio"),
+        (mutate(top_ratio=0.4, tail_ratio=0.5), "должны давать 1"),
+        (mutate(name="cases"), "повторяются"),
+    ],
+)
 def test_invalid_category(data, message):
     with pytest.raises(SettingsError, match=message):
         parse_settings(data)
@@ -92,8 +102,9 @@ def test_discovery_pacing_defaults_and_overrides():
     assert defaults.category_pause == 60.0
 
     data = copy.deepcopy(VALID)
-    data["discovery"].update(request_delay=7, request_jitter=0, block_backoff=[30, 90],
-                             category_pause=0)
+    data["discovery"].update(
+        request_delay=7, request_jitter=0, block_backoff=[30, 90], category_pause=0
+    )
     custom = parse_settings(data).discovery
     assert (custom.request_delay, custom.request_jitter) == (7.0, 0.0)
     assert custom.block_backoff == (30.0, 90.0)
@@ -121,19 +132,24 @@ def test_parser_and_backup_defaults_keep_old_behaviour():
     assert settings.backup.directory == settings_module.DEFAULT_BACKUP_DIR
 
     data = copy.deepcopy(VALID)
-    data.update(parser={"price_source": "html", "details_refresh_days": 7},
-                backup={"enabled": True, "dir": "D:/ozon-backups", "keep": 3})
+    data.update(
+        parser={"price_source": "html", "details_refresh_days": 7},
+        backup={"enabled": True, "dir": "D:/ozon-backups", "keep": 3},
+    )
     custom = parse_settings(data)
     assert (custom.parser.price_source, custom.parser.details_refresh_days) == ("html", 7)
     assert custom.backup.enabled and custom.backup.keep == 3
     assert custom.backup.directory.name == "ozon-backups"
 
 
-@pytest.mark.parametrize("section, values, message", [
-    ("parser", {"price_source": "graphql"}, "price_source"),
-    ("parser", {"details_refresh_days": -1}, "details_refresh_days"),
-    ("backup", {"keep": 0}, "keep"),
-])
+@pytest.mark.parametrize(
+    "section, values, message",
+    [
+        ("parser", {"price_source": "graphql"}, "price_source"),
+        ("parser", {"details_refresh_days": -1}, "details_refresh_days"),
+        ("backup", {"keep": 0}, "keep"),
+    ],
+)
 def test_invalid_parser_and_backup(section, values, message):
     data = copy.deepcopy(VALID)
     data[section] = values
@@ -151,8 +167,11 @@ def test_block_retry_defaults_and_limits():
     custom = parse_settings(data).schedule
     assert (custom.block_retries, custom.block_retry_delay_hours) == (0, 1.5)
 
-    for key, value in [("block_retries", 5), ("block_retries", -1),
-                       ("block_retry_delay_hours", 0.1)]:
+    for key, value in [
+        ("block_retries", 5),
+        ("block_retries", -1),
+        ("block_retry_delay_hours", 0.1),
+    ]:
         data = copy.deepcopy(VALID)
         data["schedule"][key] = value
         with pytest.raises(SettingsError, match=key):

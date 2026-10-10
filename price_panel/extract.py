@@ -85,8 +85,15 @@ RICH_HTML_RE = re.compile(r"<(img|table|ul|ol|li|picture|figure)[\s/>]")
 # Имена блоков структурного rich-описания (richAnnotationJson). Общие слова
 # вроде "image" или "table" не годятся: они встречаются в любом описании.
 RICH_JSON_MARKERS = (
-    "rapicture", "raimage", "ratable", "ralist", "rashowcase", "racolumns",
-    "ragallery", "rabillet", "ratext_block",
+    "rapicture",
+    "raimage",
+    "ratable",
+    "ralist",
+    "rashowcase",
+    "racolumns",
+    "ragallery",
+    "rabillet",
+    "ratext_block",
 )
 
 # Префикс id у встроенных в HTML состояний виджетов.
@@ -173,8 +180,11 @@ def widgets_by_name(page_json: dict, names) -> list:
     """Все состояния виджетов, чьё имя начинается с одного из указанных префиксов."""
     if isinstance(names, str):
         names = (names,)
-    return [state for name, state in iter_widgets(page_json)
-            if any(name.startswith(prefix) for prefix in names)]
+    return [
+        state
+        for name, state in iter_widgets(page_json)
+        if any(name.startswith(prefix) for prefix in names)
+    ]
 
 
 # ----------------------------------------------------------------- HTML -----
@@ -196,7 +206,7 @@ class _EmbeddedJsonCollector(HTMLParser):
         element_id = attributes.get("id") or ""
         state = attributes.get("data-state")
         if element_id.startswith(STATE_ID_PREFIX) and state:
-            self.states[element_id[len(STATE_ID_PREFIX):]] = state
+            self.states[element_id[len(STATE_ID_PREFIX) :]] = state
         if tag == "script" and attributes.get("type") == "application/ld+json":
             self._ld_chunks = []
 
@@ -289,8 +299,11 @@ def extract_price(page_json: dict) -> float | None:
 
 def _exact_widgets(page_json: dict, name: str) -> list:
     """Состояния виджетов с именем ровно name (webPrice, но не webPriceDecreased...)."""
-    return [state for widget, state in iter_widgets(page_json)
-            if widget == name and isinstance(state, dict)]
+    return [
+        state
+        for widget, state in iter_widgets(page_json)
+        if widget == name and isinstance(state, dict)
+    ]
 
 
 def extract_offer(page_json: dict) -> dict:
@@ -381,11 +394,13 @@ def extract_media(page_json: dict) -> tuple:
     for state in widgets_by_name(page_json, W_GALLERY):
         if not isinstance(state, dict):
             continue
-        images.extend(filter(None, (_media_url(item, "src", "url")
-                                    for item in state.get("images") or [])))
+        images.extend(
+            filter(None, (_media_url(item, "src", "url") for item in state.get("images") or []))
+        )
         for key in ("videos", "video"):
-            videos.extend(filter(None, (_media_url(item, "url", "src")
-                                        for item in state.get(key) or [])))
+            videos.extend(
+                filter(None, (_media_url(item, "url", "src") for item in state.get(key) or []))
+            )
         if cover is None:
             cover = text_of(state.get("coverImage")) or None
 
@@ -445,8 +460,11 @@ def find_characteristic(characteristics: dict, keywords, exclude=()) -> str | No
     вхождению. Так "Цвет" важнее "Цвета рамки", а тот - "Основного цвета".
     Названия, содержащие слово из ``exclude``, не рассматриваются.
     """
-    candidates = {name: value for name, value in characteristics.items()
-                  if not any(word in name for word in exclude)}
+    candidates = {
+        name: value
+        for name, value in characteristics.items()
+        if not any(word in name for word in exclude)
+    }
     for matches in (str.__eq__, str.startswith, str.__contains__):
         for keyword in keywords:
             for name, value in candidates.items():
@@ -531,8 +549,7 @@ def parse_product(page_json: dict, sku: str, extra_states: dict | None = None) -
         "photos_seller": photos_seller,
         "videos_seller": videos_seller,
         "color": extract_color(page_json, characteristics),
-        "material": find_characteristic(characteristics, MATERIAL_KEYS,
-                                        exclude=MATERIAL_EXCLUDE),
+        "material": find_characteristic(characteristics, MATERIAL_KEYS, exclude=MATERIAL_EXCLUDE),
         "art_set": find_characteristic(characteristics, ART_SET_KEYS),
         "has_rich_content": extract_has_rich_content(page_json),
         # Пришла ли вторая часть карточки (см. extra_states).
@@ -554,8 +571,7 @@ def parse_html(html: str, sku: str, extra_states: dict | None = None) -> dict:
     return product_from_embedded(embedded_page_json(html), sku, extra_states)
 
 
-def product_from_embedded(embedded: dict, sku: str,
-                          extra_states: dict | None = None) -> dict:
+def product_from_embedded(embedded: dict, sku: str, extra_states: dict | None = None) -> dict:
     """parse_html по уже разобранному HTML (результат embedded_page_json).
 
     Разбор HTML - самая дорогая часть, поэтому, если к карточке позже

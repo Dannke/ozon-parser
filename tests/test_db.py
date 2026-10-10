@@ -14,14 +14,14 @@ VALID = ("ozon_products", "public.ozon_products", "_tmp", "T1", "schema_1.table_
 
 INVALID = (
     "",
-    "ozon products",                      # пробел
-    "ozon-products",                      # дефис
-    "1table",                             # начинается с цифры
-    "a.b.c",                              # слишком много частей
-    "ozon_products; DROP TABLE users",    # классика
-    "ozon_products--",                    # хвост комментария
-    'ozon"products',                      # кавычка
-    "таблица",                            # не латиница
+    "ozon products",  # пробел
+    "ozon-products",  # дефис
+    "1table",  # начинается с цифры
+    "a.b.c",  # слишком много частей
+    "ozon_products; DROP TABLE users",  # классика
+    "ozon_products--",  # хвост комментария
+    'ozon"products',  # кавычка
+    "таблица",  # не латиница
 )
 
 
@@ -58,4 +58,3 @@ def test_missing_driver_gives_actionable_message():
         db._import_psycopg2()
     except db.DatabaseError as exc:
         assert "postgres" in str(exc), exc
-

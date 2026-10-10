@@ -64,23 +64,32 @@ PROJECT_PREFIX = """
 cd {{ var.value.get('ozon_project_dir', '/opt/ozon_parser') }} && \
 {{ var.value.get('ozon_python', '.venv/bin/python') }}"""
 
-SESSION_COMMAND = PROJECT_PREFIX + """ get_cookies.py \
+SESSION_COMMAND = (
+    PROJECT_PREFIX
+    + """ get_cookies.py \
 --non-interactive \
 --max-age-days {{ var.value.get('ozon_cookies_ttl_days', '14') }}
 """
+)
 
-PARSE_COMMAND = PROJECT_PREFIX + """ parse_ozon.py \
+PARSE_COMMAND = (
+    PROJECT_PREFIX
+    + """ parse_ozon.py \
 --file skus.txt \
 --storage {{ var.value.get('ozon_storage', 'postgres') }} \
 --min-success-rate {{ var.value.get('ozon_min_success_rate', '0.8') }} \
 --date {{ data_interval_end | ds }}
 """
+)
 
-CHECK_COMMAND = PROJECT_PREFIX + """ check_snapshot.py \
+CHECK_COMMAND = (
+    PROJECT_PREFIX
+    + """ check_snapshot.py \
 --storage {{ var.value.get('ozon_storage', 'postgres') }} \
 --min-rows {{ var.value.get('ozon_min_rows', '1') }} \
 --date {{ data_interval_end | ds }}
 """
+)
 
 # На сервере окну браузера взяться неоткуда.
 HEADLESS_ENV = {"HEADLESS": "1"}
@@ -103,12 +112,11 @@ with DAG(
     # 05:30 по Москве: ночные пересчёты цен уже прошли, до дневной нагрузки далеко.
     schedule="30 5 * * *",
     start_date=pendulum.datetime(2026, 9, 1, tz="Europe/Moscow"),
-    catchup=False,        # цены задним числом всё равно не собрать
-    max_active_runs=1,    # параллельные запуски подняли бы два браузера разом
+    catchup=False,  # цены задним числом всё равно не собрать
+    max_active_runs=1,  # параллельные запуски подняли бы два браузера разом
     dagrun_timeout=dt.timedelta(hours=3),
     tags=["ozon", "parser", "datalens"],
 ) as dag:
-
     # Вход занимает 1-3 минуты; каждый повтор запрашивает новый код на почту.
     session_task = BashOperator(
         task_id="ensure_session",

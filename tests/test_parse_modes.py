@@ -15,8 +15,12 @@ from test_extract import FIXTURE, card_html
 from price_panel import parse
 
 PAGE = cast(Page, None)
-FULL_HTML = card_html({"webProductHeading-1-default-1": {"title": "Кресло из HTML"},
-                       "webPrice-2-default-1": {"price": "9 990 ₽"}})
+FULL_HTML = card_html(
+    {
+        "webProductHeading-1-default-1": {"title": "Кресло из HTML"},
+        "webPrice-2-default-1": {"price": "9 990 ₽"},
+    }
+)
 NO_PRICE_HTML = card_html({"webProductHeading-1-default-1": {"title": "Кресло из HTML"}})
 
 HTML_ONLY = parse.ParseOptions(price_source="html", details_for=frozenset())
@@ -89,9 +93,14 @@ def test_default_options_are_the_legacy_scenario(monkeypatch):
 
 def test_sold_out_card_in_html_is_enough():
     """«Нет в наличии» без цены - тоже карточка: идти в API незачем."""
-    sold_out = parse.parse_html(card_html({
-        "webProductHeading-1-default-1": {"title": "Кресло"},
-        "webOutOfStock-2-default-1": {"price": ""},
-    }), "1")
+    sold_out = parse.parse_html(
+        card_html(
+            {
+                "webProductHeading-1-default-1": {"title": "Кресло"},
+                "webOutOfStock-2-default-1": {"price": ""},
+            }
+        ),
+        "1",
+    )
     assert parse.html_is_enough(sold_out)
     assert not parse.html_is_enough(parse.parse_html(NO_PRICE_HTML, "1"))

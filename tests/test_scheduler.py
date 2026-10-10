@@ -15,14 +15,23 @@ from price_panel.pipeline import EXIT_BLOCKED
 from price_panel.settings import parse_settings
 
 MSK = scheduler.get_timezone("Europe/Moscow")
-BASE = {"discovery": {"categories": [
-    {"name": "phones", "url": "https://www.ozon.ru/category/smartfony-15502/",
-     "panel_size": 5}]}}
+BASE = {
+    "discovery": {
+        "categories": [
+            {
+                "name": "phones",
+                "url": "https://www.ozon.ru/category/smartfony-15502/",
+                "panel_size": 5,
+            }
+        ]
+    }
+}
 
 
 @pytest.fixture(autouse=True)
 def network(monkeypatch):
     """Сеть «есть» без настоящего DNS; network.down - сколько проверок подряд её нет."""
+
     class Network:
         down = 0
         checks = 0
@@ -68,8 +77,15 @@ def test_job_steps():
     assert [name for name, _ in steps] == ["ensure_session", "parse"]
     assert steps[0][1][-2:] == ["--max-age-days", "7"]
     assert "--non-interactive" in steps[0][1]
-    assert steps[1][1] == [sys.executable, "-m", "price_panel", "parse", "--kind", "daily",
-                           "--missing-today"]
+    assert steps[1][1] == [
+        sys.executable,
+        "-m",
+        "price_panel",
+        "parse",
+        "--kind",
+        "daily",
+        "--missing-today",
+    ]
 
     steps = scheduler.job_commands(settings(ensure_session=False))
     assert [name for name, _ in steps] == ["parse"]
@@ -145,9 +161,11 @@ def test_blocked_run_is_retried_after_delay(monkeypatch):
 def test_retries_are_limited(monkeypatch):
     clock = FakeClock()
     calls = scripted_parse(monkeypatch, clock, [EXIT_BLOCKED] * 3)
-    code = scheduler.run_job(settings(ensure_session=False, block_retries=2,
-                                      block_retry_delay_hours=1),
-                             clock=clock, sleep=clock.sleep)
+    code = scheduler.run_job(
+        settings(ensure_session=False, block_retries=2, block_retry_delay_hours=1),
+        clock=clock,
+        sleep=clock.sleep,
+    )
     assert code == EXIT_BLOCKED
     assert len(calls) == 3
 
@@ -157,11 +175,11 @@ def test_job_waits_for_network_before_start(monkeypatch, network):
     clock = FakeClock()
     network.down = 2
     events = []
-    monkeypatch.setattr(scheduler.notify, "report_start",
-                        lambda details=None: events.append(("start", clock.slept)))
+    monkeypatch.setattr(
+        scheduler.notify, "report_start", lambda details=None: events.append(("start", clock.slept))
+    )
     scripted_parse(monkeypatch, clock, [0])
-    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
-                             sleep=clock.sleep) == 0
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock, sleep=clock.sleep) == 0
     assert events == [("start", 2 * scheduler.NETWORK_POLL_SECONDS)]
 
 
@@ -170,8 +188,7 @@ def test_job_runs_anyway_when_network_never_comes(monkeypatch, network):
     clock = FakeClock()
     network.down = 10_000
     calls = scripted_parse(monkeypatch, clock, [1])
-    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
-                             sleep=clock.sleep) == 1
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock, sleep=clock.sleep) == 1
     assert len(calls) == 1
     assert clock.slept == scheduler.NETWORK_WAIT_SECONDS
     # Ожидание съело часть общего предела прогона, а не продлило его.
@@ -181,8 +198,7 @@ def test_job_runs_anyway_when_network_never_comes(monkeypatch, network):
 def test_ordinary_failure_is_not_retried(monkeypatch):
     clock = FakeClock()
     calls = scripted_parse(monkeypatch, clock, [1])
-    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
-                             sleep=clock.sleep) == 1
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock, sleep=clock.sleep) == 1
     assert len(calls) == 1 and clock.slept == 0
 
 
@@ -190,9 +206,11 @@ def test_no_retry_without_time_left(monkeypatch):
     """Повтор, который не успеет поработать хотя бы час, не начинается."""
     clock = FakeClock()
     calls = scripted_parse(monkeypatch, clock, [EXIT_BLOCKED], step_seconds=5 * 3600)
-    code = scheduler.run_job(settings(ensure_session=False, parse_timeout_hours=8,
-                                      block_retry_delay_hours=3),
-                             clock=clock, sleep=clock.sleep)
+    code = scheduler.run_job(
+        settings(ensure_session=False, parse_timeout_hours=8, block_retry_delay_hours=3),
+        clock=clock,
+        sleep=clock.sleep,
+    )
     assert code == EXIT_BLOCKED
     assert len(calls) == 1 and clock.slept == 0
 
@@ -203,8 +221,11 @@ def with_backup():
 
 def recorded_reports(monkeypatch) -> list:
     reports: list = []
-    monkeypatch.setattr(scheduler.notify, "report_job",
-                        lambda code, backup_ok, summary=None: reports.append((code, backup_ok)))
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_job",
+        lambda code, backup_ok, summary=None: reports.append((code, backup_ok)),
+    )
     return reports
 
 
@@ -227,8 +248,11 @@ def test_backup_and_report_run_once_after_retries(monkeypatch):
 
 def test_failed_backup_is_reported_but_keeps_parse_code(monkeypatch):
     codes = iter([0, 1])  # parse, backup
-    monkeypatch.setattr(scheduler.subprocess, "run",
-                        lambda command, **kwargs: subprocess.CompletedProcess(command, next(codes)))
+    monkeypatch.setattr(
+        scheduler.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, next(codes)),
+    )
     reports = recorded_reports(monkeypatch)
     assert scheduler.run_job(with_backup()) == 0
     assert reports == [(0, False)]
@@ -236,8 +260,11 @@ def test_failed_backup_is_reported_but_keeps_parse_code(monkeypatch):
 
 def test_report_without_backup(monkeypatch):
     """Копия выключена - в оповещение уходит None, а не «не создана»."""
-    monkeypatch.setattr(scheduler.subprocess, "run",
-                        lambda command, **kwargs: subprocess.CompletedProcess(command, 1))
+    monkeypatch.setattr(
+        scheduler.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1),
+    )
     reports = recorded_reports(monkeypatch)
     assert scheduler.run_job(settings(ensure_session=False)) == 1
     assert reports == [(1, None)]
@@ -262,16 +289,21 @@ def test_job_reports_start_retry_and_result(monkeypatch):
     clock = FakeClock()
     scripted_parse(monkeypatch, clock, [EXIT_BLOCKED, 0])
     events: list = []
-    monkeypatch.setattr(scheduler.notify, "report_start",
-                        lambda details: events.append("start"))
-    monkeypatch.setattr(scheduler.notify, "report_retry",
-                        lambda retry_at, attempt, attempts, details: events.append(
-                            ("retry", retry_at, attempt, attempts)))
-    monkeypatch.setattr(scheduler.notify, "report_job",
-                        lambda code, backup_ok, summary: events.append(("result", code)))
+    monkeypatch.setattr(scheduler.notify, "report_start", lambda details: events.append("start"))
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_retry",
+        lambda retry_at, attempt, attempts, details: events.append(
+            ("retry", retry_at, attempt, attempts)
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_job",
+        lambda code, backup_ok, summary: events.append(("result", code)),
+    )
 
-    assert scheduler.run_job(settings(ensure_session=False), clock=clock,
-                             sleep=clock.sleep) == 0
+    assert scheduler.run_job(settings(ensure_session=False), clock=clock, sleep=clock.sleep) == 0
     # Повтор - через 3 ч после конца первого шага: старт 1_000_000 + 1800 с.
     retry_at = dt.datetime.fromtimestamp(1_000_000 + 1800 + 3 * 3600, MSK).strftime("%H:%M")
     assert events == ["start", ("retry", retry_at + " MSK", 1, 1), ("result", 0)]
@@ -280,17 +312,21 @@ def test_job_reports_start_retry_and_result(monkeypatch):
 def test_run_summary_text():
     row = (15, "daily", "partial", None, 1200, 1150, 50, 8100.0, 8.9, 6.7, 3.0)
     text = scheduler.format_run(row, [("blocked", 45), ("timeout", 5)])
-    assert text == ("Прогон 15 (daily): partial, успешно 1150 из 1200, ошибок 50, "
-                    "2h 15m 00s, 8.9 SKU/мин\nОшибки: blocked 45, timeout 5")
+    assert text == (
+        "Прогон 15 (daily): partial, успешно 1150 из 1200, ошибок 50, "
+        "2h 15m 00s, 8.9 SKU/мин\nОшибки: blocked 45, timeout 5"
+    )
     # Прерванный прогон: длительности и скорости может не быть.
     row = (16, "daily", "interrupted", None, 1200, 10, 0, None, None, None, 3.0)
     assert scheduler.format_run(row, []) == (
-        "Прогон 16 (daily): interrupted, успешно 10 из 1200, ошибок 0")
+        "Прогон 16 (daily): interrupted, успешно 10 из 1200, ошибок 0"
+    )
     assert scheduler.format_progress(1200, 52) == "За сегодня собрано 1148 из 1200 SKU panel"
 
 
 def test_summaries_are_empty_without_database(monkeypatch):
     """Оповещение уходит и без подробностей, если база не отвечает."""
+
     def broken():
         raise DatabaseError("Ошибка PostgreSQL: connection refused")
 
@@ -365,6 +401,7 @@ def test_summary_reports_todays_daily_run_not_a_later_manual_one(monkeypatch):
 def test_summary_skips_yesterdays_run(monkeypatch):
     """Сегодня собирать было нечего - вчерашний прогон за итог не выдаётся."""
     yesterday = dt.datetime.now(dt.UTC) - dt.timedelta(days=2)
-    monkeypatch.setattr(scheduler, "Warehouse",
-                        lambda: SummaryWarehouse([run_row(7, "daily", yesterday)]))
+    monkeypatch.setattr(
+        scheduler, "Warehouse", lambda: SummaryWarehouse([run_row(7, "daily", yesterday)])
+    )
     assert scheduler.job_summary(settings()) == "За сегодня собрано 2 из 3 SKU panel"

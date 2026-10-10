@@ -74,7 +74,7 @@ def test_postgres_ddl_covers_fields():
 def test_clickhouse_ddl_matches_order():
     """Порядок колонок в ClickHouse совпадает с порядком вставки."""
     columns = _columns_from_ddl(storage.CH_DDL)
-    assert columns[:len(storage.DB_FIELDS)] == list(storage.DB_FIELDS), columns
+    assert columns[: len(storage.DB_FIELDS)] == list(storage.DB_FIELDS), columns
 
 
 def test_upsert_is_idempotent_by_day():
@@ -195,6 +195,7 @@ def test_database_failure_still_writes_csv(monkeypatch):
     Регрессия: исключение из save_postgres вылетало до записи CSV, хотя CSV и
     задуман страховкой на случай недоступной базы.
     """
+
     def database_down(*args, **kwargs):
         raise storage.StorageError("Ошибка PostgreSQL: connection refused")
 
@@ -220,4 +221,3 @@ def test_csv_failure_is_fatal_when_csv_is_the_only_backend():
         except storage.StorageError:
             return
     raise AssertionError("ошибка записи CSV должна была подняться наверх")
-

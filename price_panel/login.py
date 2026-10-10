@@ -256,8 +256,9 @@ def save_failure_screenshot(page: Page) -> None:
 def open_data_ozon(page: Page) -> None:
     """Открывает data.ozon.ru и дожидается прохождения антибот-проверки."""
     log.info("Открываю %s", config.DATA_OZON_URL)
-    response = page.goto(config.DATA_OZON_URL, wait_until="domcontentloaded",
-                         timeout=config.PAGE_TIMEOUT)
+    response = page.goto(
+        config.DATA_OZON_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
+    )
     if not browser_utils.pass_challenge(page, response):
         raise LoginError(
             "Антибот-проверка Ozon не прошла за {} с. Попробуйте позже или войдите "
@@ -330,7 +331,8 @@ def submit_phone(page: Page, phone: str) -> float:
     if accepted not in (digits, phone):
         raise LoginError(
             "Поле телефона приняло {} вместо {} - изменилась маска ввода".format(
-                masked(accepted), masked(phone))
+                masked(accepted), masked(phone)
+            )
         )
 
     requested_at = time.time()
@@ -366,8 +368,10 @@ def wait_for_code_screen(page: Page) -> None:
             return
         if find_visible(page, CODE_INPUT_SELECTORS, timeout=1_000) is not None:
             return
-    raise LoginError("Экран ввода кода не появился - Ozon мог отклонить запрос "
-                     "(неизвестная почта, лимит попыток) или изменилась вёрстка")
+    raise LoginError(
+        "Экран ввода кода не появился - Ozon мог отклонить запрос "
+        "(неизвестная почта, лимит попыток) или изменилась вёрстка"
+    )
 
 
 def fill_code(page: Page, code: str) -> None:
@@ -376,8 +380,9 @@ def fill_code(page: Page, code: str) -> None:
     Поддерживаются оба варианта формы: одно поле на весь код и набор полей
     по одной цифре.
     """
-    code_input = find_visible(page, CODE_INPUT_SELECTORS + GENERIC_INPUT_SELECTORS,
-                              timeout=config.ELEMENT_TIMEOUT)
+    code_input = find_visible(
+        page, CODE_INPUT_SELECTORS + GENERIC_INPUT_SELECTORS, timeout=config.ELEMENT_TIMEOUT
+    )
     if code_input is None:
         raise LoginError("Не найдено поле ввода кода подтверждения")
 
@@ -465,7 +470,8 @@ def check_settings(method: str) -> str | None:
     """Текст ошибки, если для выбранного способа входа не хватает настроек."""
     if method not in LOGIN_METHODS:
         return "Неизвестный способ входа LOGIN_METHOD={!r}, допустимо: {}".format(
-            method, ", ".join(LOGIN_METHODS))
+            method, ", ".join(LOGIN_METHODS)
+        )
     if not config.OZON_EMAIL:
         # Нужна при любом способе: по ней выбирается письмо с кодом в ящике.
         return "Не задан OZON_EMAIL. Заполните .env (см. .env.example)"
@@ -474,8 +480,13 @@ def check_settings(method: str) -> str | None:
     return None
 
 
-def run(manual: bool = False, force: bool = False, method: str = "",
-        max_age_days: float | None = None, interactive: bool = True) -> int:
+def run(
+    manual: bool = False,
+    force: bool = False,
+    method: str = "",
+    max_age_days: float | None = None,
+    interactive: bool = True,
+) -> int:
     """Точка входа. Возвращает код возврата процесса.
 
     :param force: войти заново, даже если сессия действительна.
@@ -558,20 +569,29 @@ def run(manual: bool = False, force: bool = False, method: str = "",
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Авторизация на data.ozon.ru и сохранение cookies")
-    parser.add_argument("--method", choices=LOGIN_METHODS,
-                        help="способ входа: по почте или по телефону (по умолчанию из .env)")
-    parser.add_argument("--manual", action="store_true",
-                        help="войти вручную в открытом браузере")
-    parser.add_argument("--force", action="store_true",
-                        help="перезаписать действующую сессию")
-    parser.add_argument("--max-age-days", type=float,
-                        help="войти заново, если сессия старше N дней")
-    parser.add_argument("--non-interactive", action="store_true",
-                        help="запуск без человека (Airflow): без ручного входа и "
-                             "без окна согласия Google")
+    parser.add_argument(
+        "--method",
+        choices=LOGIN_METHODS,
+        help="способ входа: по почте или по телефону (по умолчанию из .env)",
+    )
+    parser.add_argument("--manual", action="store_true", help="войти вручную в открытом браузере")
+    parser.add_argument("--force", action="store_true", help="перезаписать действующую сессию")
+    parser.add_argument(
+        "--max-age-days", type=float, help="войти заново, если сессия старше N дней"
+    )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="запуск без человека (Airflow): без ручного входа и без окна согласия Google",
+    )
     args = parser.parse_args()
-    return run(manual=args.manual, force=args.force, method=args.method or "",
-               max_age_days=args.max_age_days, interactive=not args.non_interactive)
+    return run(
+        manual=args.manual,
+        force=args.force,
+        method=args.method or "",
+        max_age_days=args.max_age_days,
+        interactive=not args.non_interactive,
+    )
 
 
 if __name__ == "__main__":

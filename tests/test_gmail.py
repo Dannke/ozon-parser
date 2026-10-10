@@ -34,8 +34,10 @@ def _message(internal_ms: int, subject: str, text: str) -> dict:
         "snippet": text[:60],
         "payload": {
             "mimeType": "text/plain",
-            "headers": [{"name": "Subject", "value": subject},
-                        {"name": "From", "value": "noreply@ozon.ru"}],
+            "headers": [
+                {"name": "Subject", "value": subject},
+                {"name": "From", "value": "noreply@ozon.ru"},
+            ],
             "body": {"data": _b64(text)},
         },
     }
@@ -101,8 +103,10 @@ def test_plain_text_part_is_preferred():
     """
     payload = {
         "mimeType": "multipart/alternative",
-        "parts": [_part("text/plain", "Ваш код: 483712"),
-                  _part("text/html", "<p>Ваш код: 999999</p>")],
+        "parts": [
+            _part("text/plain", "Ваш код: 483712"),
+            _part("text/html", "<p>Ваш код: 999999</p>"),
+        ],
     }
     text = collect_text(payload)
     assert "483712" in text
@@ -110,8 +114,10 @@ def test_plain_text_part_is_preferred():
 
 
 def test_html_used_when_no_plain_part():
-    payload = {"mimeType": "multipart/alternative",
-               "parts": [_part("text/html", "<p>Ваш код: 999999</p>")]}
+    payload = {
+        "mimeType": "multipart/alternative",
+        "parts": [_part("text/html", "<p>Ваш код: 999999</p>")],
+    }
     assert "999999" in collect_text(payload)
 
 
@@ -195,8 +201,10 @@ def test_checked_messages_are_not_refetched():
     """
     now_ms = int(time.time() * 1000)
     metas = [{"id": "a"}, {"id": "b"}]
-    bodies = {"a": _message(now_ms, "Рассылка", "Скидки до 50 процентов"),
-              "b": _message(now_ms, "Новости", "Ничего интересного")}
+    bodies = {
+        "a": _message(now_ms, "Рассылка", "Скидки до 50 процентов"),
+        "b": _message(now_ms, "Новости", "Ничего интересного"),
+    }
     fake = FakeMessages(metas, bodies)
 
     try:
@@ -210,19 +218,16 @@ def test_checked_messages_are_not_refetched():
 
 def test_code_found_in_fresh_message():
     now_ms = int(time.time() * 1000)
-    fake = FakeMessages([{"id": "a"}],
-                        {"a": _message(now_ms, "Вход в Ozon", "Ваш код: 483712")})
+    fake = FakeMessages([{"id": "a"}], {"a": _message(now_ms, "Вход в Ozon", "Ваш код: 483712")})
     assert _reader(fake).wait_for_code(since_ts=time.time() - 10, timeout=5) == "483712"
 
 
 def test_old_message_is_skipped():
     """Письмо, пришедшее ДО запроса кода, не годится: код в нём уже протух."""
     old_ms = int((time.time() - 3600) * 1000)
-    fake = FakeMessages([{"id": "a"}],
-                        {"a": _message(old_ms, "Вход в Ozon", "Ваш код: 483712")})
+    fake = FakeMessages([{"id": "a"}], {"a": _message(old_ms, "Вход в Ozon", "Ваш код: 483712")})
     try:
         _reader(fake).wait_for_code(since_ts=time.time(), timeout=2)
     except GmailError:
         return
     raise AssertionError("старое письмо не должно было подойти")
-

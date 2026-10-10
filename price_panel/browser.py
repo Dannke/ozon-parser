@@ -71,8 +71,9 @@ def launch(playwright, headless: bool | None = None):
             log.debug("Канал %s недоступен: %s", channel, str(exc).splitlines()[0])
             continue
         log.info("Использую системный браузер: %s", channel)
-        log.info("Чтобы не терять время на лишние попытки, добавьте в .env: "
-                 "BROWSER_CHANNEL=%s", channel)
+        log.info(
+            "Чтобы не терять время на лишние попытки, добавьте в .env: BROWSER_CHANNEL=%s", channel
+        )
         return browser
 
     raise PlaywrightError(
@@ -185,8 +186,12 @@ def save_challenge_snapshot(page: Page, directory: Path | None = None) -> Path |
         visible = " ".join((page.inner_text("body", timeout=5_000) or "").split())
     except PlaywrightError:
         title, visible = "", ""
-    log.warning("Непройденная проверка: url=%s title=%r текст=%r",
-                getattr(page, "url", ""), title, visible[:300])
+    log.warning(
+        "Непройденная проверка: url=%s title=%r текст=%r",
+        getattr(page, "url", ""),
+        title,
+        visible[:300],
+    )
     try:
         directory.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(path), full_page=False)

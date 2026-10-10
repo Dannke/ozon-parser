@@ -19,9 +19,14 @@ from price_panel import config, discovery
 from price_panel.sampling import Candidate, listing_position, make_rng
 from price_panel.settings import CategoryConfig
 
-CATEGORY = CategoryConfig(name="phones", panel_size=20, top_ratio=0.4,
-                          url="https://www.ozon.ru/category/smartfony-15502/",
-                          tail_max_page=300, tail_items_per_page=2)
+CATEGORY = CategoryConfig(
+    name="phones",
+    panel_size=20,
+    top_ratio=0.4,
+    url="https://www.ozon.ru/category/smartfony-15502/",
+    tail_max_page=300,
+    tail_items_per_page=2,
+)
 
 
 class FakeListing(discovery.ListingSource):
@@ -31,8 +36,7 @@ class FakeListing(discovery.ListingSource):
     стольких запросов Ozon «ограничивает запросы» и больше ничего не отдаёт.
     """
 
-    def __init__(self, depth: int, broken: Iterable = (),
-                 block_after: int = 0):  # без браузера
+    def __init__(self, depth: int, broken: Iterable = (), block_after: int = 0):  # без браузера
         self.depth = depth
         self.broken = set(broken)
         self.block_after = block_after
@@ -55,14 +59,20 @@ class FakeListing(discovery.ListingSource):
             return None
         if page_number > self.depth:
             return []
-        return [Candidate(sku="{}-{}".format(page_number, i),
-                          position=listing_position(page_number, i, 8), page=page_number)
-                for i in range(8)]
+        return [
+            Candidate(
+                sku="{}-{}".format(page_number, i),
+                position=listing_position(page_number, i, 8),
+                page=page_number,
+            )
+            for i in range(8)
+        ]
 
 
 def crawl(source, top_needed, tail_needed, exclude=()):
-    return discovery.discover_listing(source, CATEGORY, top_needed, tail_needed, set(exclude),
-                                      make_rng("s", "phones"))
+    return discovery.discover_listing(
+        source, CATEGORY, top_needed, tail_needed, set(exclude), make_rng("s", "phones")
+    )
 
 
 # ------------------------------------------------------------ обход ------
@@ -72,11 +82,11 @@ def test_top_is_read_page_by_page_and_tail_is_deep_and_random():
     top_pages = sorted({c.page for c in result.top})
     tail_pages = sorted({c.page for c in result.tail})
 
-    assert top_pages == [1]                       # 8 товаров top - одна страница
-    assert len(tail_pages) == 6                   # 12 товаров хвоста по 2 со страницы
+    assert top_pages == [1]  # 8 товаров top - одна страница
+    assert len(tail_pages) == 6  # 12 товаров хвоста по 2 со страницы
     assert all(2 <= p <= CATEGORY.tail_max_page for p in tail_pages)
     assert len(source.requested) == len(set(source.requested)), "страница запрошена дважды"
-    assert result.depth is None                   # конец выдачи не встретился
+    assert result.depth is None  # конец выдачи не встретился
     assert not result.blocked
 
 
@@ -122,7 +132,7 @@ def test_broken_top_page_keeps_what_was_found():
 
 def test_block_during_tail_returns_partial_result_and_stops_requests():
     """Ozon ограничил запросы: собранное сохраняется, новых запросов нет."""
-    source = FakeListing(depth=500, block_after=4)   # top 1 страница + 3 страницы хвоста
+    source = FakeListing(depth=500, block_after=4)  # top 1 страница + 3 страницы хвоста
     result = crawl(source, 8, 12)
     assert result.blocked
     assert {c.page for c in result.top} == {1}
@@ -139,8 +149,15 @@ def test_block_during_top_skips_tail():
 
 
 # ------------------------------------------------ ListingSource.fetch ------
-LISTING_OK = json.dumps({"widgetStates": {"tileGridDesktop-1-default-1": json.dumps(
-    {"items": [{"action": {"link": "/product/phone-123456/"}}]})}})
+LISTING_OK = json.dumps(
+    {
+        "widgetStates": {
+            "tileGridDesktop-1-default-1": json.dumps(
+                {"items": [{"action": {"link": "/product/phone-123456/"}}]}
+            )
+        }
+    }
+)
 
 
 class FakePage:
@@ -181,8 +198,7 @@ def source_for(responses, backoff=(10, 60, 180)):
         page.sessions += 1
         return cast(Page, page)
 
-    return discovery.ListingSource(new_page, delay=0.001, jitter=0,
-                                   block_backoff=backoff), page
+    return discovery.ListingSource(new_page, delay=0.001, jitter=0, block_backoff=backoff), page
 
 
 def ok():
@@ -219,8 +235,9 @@ def test_persistent_block_stops_the_source(waits):
 
 
 def test_ordinary_errors_use_short_retries_not_backoff(waits):
-    source, page = source_for([PlaywrightError("Execution context was destroyed"),
-                               {"status": 500, "body": ""}, ok()])
+    source, page = source_for(
+        [PlaywrightError("Execution context was destroyed"), {"status": 500, "body": ""}, ok()]
+    )
     assert source.fetch(CATEGORY, 5)
     assert all(w < 1 for w in waits["sleeps"]), "обычный сбой не должен ждать минутами"
     assert page.sessions == 1, "обычный сбой повторяется в той же сессии"
@@ -230,5 +247,5 @@ def test_ordinary_errors_use_short_retries_not_backoff(waits):
 def test_ordinary_errors_give_up_after_max_retries(waits):
     source, page = source_for([{"status": 500, "body": ""}] * 3)
     assert source.fetch(CATEGORY, 5) is None
-    assert page.calls == 3                     # 1 + MAX_RETRIES
-    assert not source.blocked                  # это не блокировка: идём дальше
+    assert page.calls == 3  # 1 + MAX_RETRIES
+    assert not source.blocked  # это не блокировка: идём дальше

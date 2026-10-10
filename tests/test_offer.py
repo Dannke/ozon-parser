@@ -23,25 +23,34 @@ def test_offer_fields_from_web_price():
 
 
 def test_out_of_stock_widget_means_not_available():
-    page = {"widgetStates": {
-        "webOutOfStock-1-default-1": json.dumps({"price": "990 ₽"}),
-        "webPrice-2-default-1": json.dumps({"price": "990 ₽", "isAvailable": True}),
-    }}
+    page = {
+        "widgetStates": {
+            "webOutOfStock-1-default-1": json.dumps({"price": "990 ₽"}),
+            "webPrice-2-default-1": json.dumps({"price": "990 ₽", "isAvailable": True}),
+        }
+    }
     assert extract_offer(page)["is_available"] is False
 
 
 def test_hidden_original_price_is_not_old_price():
-    page = {"widgetStates": {"webPrice-2-default-1": json.dumps(
-        {"price": "990 ₽", "originalPrice": "990 ₽", "showOriginalPrice": False})}}
+    page = {
+        "widgetStates": {
+            "webPrice-2-default-1": json.dumps(
+                {"price": "990 ₽", "originalPrice": "990 ₽", "showOriginalPrice": False}
+            )
+        }
+    }
     assert extract_offer(page)["old_price"] is None
 
 
 def test_availability_from_web_sale_when_price_widget_is_silent():
     """webPriceDecreasedCompact - не webPrice: префикс не должен его подхватить."""
-    page = {"widgetStates": {
-        "webPriceDecreasedCompact-1-default-1": json.dumps({"isAvailable": True}),
-        "webSale-2-default-1": json.dumps({"offer": {"isAvailable": False}}),
-    }}
+    page = {
+        "widgetStates": {
+            "webPriceDecreasedCompact-1-default-1": json.dumps({"isAvailable": True}),
+            "webSale-2-default-1": json.dumps({"offer": {"isAvailable": False}}),
+        }
+    }
     assert extract_offer(page)["is_available"] is False
 
 
@@ -55,8 +64,11 @@ def test_discount_pct():
 def test_html_fallback_takes_availability_from_json_ld():
     html = card_html(
         {"webProductHeading-1-default-1": {"title": "Кресло"}},
-        json_ld={"@type": "Product", "name": "Кресло",
-                 "offers": {"price": "5000", "availability": "https://schema.org/OutOfStock"}},
+        json_ld={
+            "@type": "Product",
+            "name": "Кресло",
+            "offers": {"price": "5000", "availability": "https://schema.org/OutOfStock"},
+        },
     )
     product = parse_html(html, "1")
     assert product["price"] == 5000.0

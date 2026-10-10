@@ -15,13 +15,20 @@ import pytest
 from price_panel import backup
 
 DAY = dt.date(2026, 10, 6)
-LISTING = (b";\n; Archive created at 2026-10-06 12:00:00 UTC\n"
-           b"3412; 0 16420 TABLE DATA public price_history ozon\n")
+LISTING = (
+    b";\n; Archive created at 2026-10-06 12:00:00 UTC\n"
+    b"3412; 0 16420 TABLE DATA public price_history ozon\n"
+)
 
 
-def fake_docker(dump: bytes = b"PGDMP\x01\x0e\x00 data", dump_code: int = 0,
-                listing: bytes = LISTING, calls: list | None = None):
+def fake_docker(
+    dump: bytes = b"PGDMP\x01\x0e\x00 data",
+    dump_code: int = 0,
+    listing: bytes = LISTING,
+    calls: list | None = None,
+):
     """subprocess.run для docker compose exec: pg_dump и pg_restore --list."""
+
     def run(command, **kwargs):
         if calls is not None:
             calls.append(command)
@@ -35,6 +42,7 @@ def fake_docker(dump: bytes = b"PGDMP\x01\x0e\x00 data", dump_code: int = 0,
         assert os.lseek(stdin.fileno(), 0, os.SEEK_CUR) == 0
         assert os.read(stdin.fileno(), 5) == b"PGDMP"
         return subprocess.CompletedProcess(command, 0, stdout=listing, stderr=b"")
+
     return run
 
 
@@ -59,14 +67,21 @@ def test_old_backups_are_rotated(tmp_path):
 
     backup.create_backup(tmp_path, keep=3, today=DAY, runner=fake_docker())
     assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "notes.txt", "ozon-2026-10-04.dump", "ozon-2026-10-05.dump", "ozon-2026-10-06.dump"]
+        "notes.txt",
+        "ozon-2026-10-04.dump",
+        "ozon-2026-10-05.dump",
+        "ozon-2026-10-06.dump",
+    ]
 
 
-@pytest.mark.parametrize("runner, message", [
-    (fake_docker(dump_code=1), "connection failed"),
-    (fake_docker(dump=b"<html>not a dump</html>"), "не архив"),
-    (fake_docker(listing=b"; empty archive\n"), "истории цен"),
-])
+@pytest.mark.parametrize(
+    "runner, message",
+    [
+        (fake_docker(dump_code=1), "connection failed"),
+        (fake_docker(dump=b"<html>not a dump</html>"), "не архив"),
+        (fake_docker(listing=b"; empty archive\n"), "истории цен"),
+    ],
+)
 def test_bad_backup_keeps_previous_copies(tmp_path, runner, message):
     """Неудачная копия не занимает место прежних и не остаётся на диске."""
     previous = tmp_path / "ozon-2026-10-05.dump"

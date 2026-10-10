@@ -146,10 +146,28 @@ FROM (
 WHERE r.run_id = s.run_id
 """
 
-PRODUCT_FIELDS = ("sku", "title", "cover_image", "color", "material", "art_set",
-                  "has_rich_content", "photos_seller", "videos_seller")
-PRICE_FIELDS = ("sku", "price", "card_price", "old_price", "discount_pct", "is_available",
-                "rating", "reviews_total", "source")
+PRODUCT_FIELDS = (
+    "sku",
+    "title",
+    "cover_image",
+    "color",
+    "material",
+    "art_set",
+    "has_rich_content",
+    "photos_seller",
+    "videos_seller",
+)
+PRICE_FIELDS = (
+    "sku",
+    "price",
+    "card_price",
+    "old_price",
+    "discount_pct",
+    "is_available",
+    "rating",
+    "reviews_total",
+    "source",
+)
 # Поля карточки, которые берутся из второй части (описание, полные характеристики).
 DETAIL_FIELDS = ("has_rich_content", "art_set", "color", "material")
 
@@ -251,8 +269,7 @@ class Warehouse:
                     continue
                 log.info("Применяю миграцию %s", path.name)
                 cursor.execute(path.read_text(encoding="utf-8"))
-                cursor.execute("INSERT INTO schema_migrations (version) VALUES (%s)",
-                               (path.stem,))
+                cursor.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (path.stem,))
                 applied.append(path.stem)
             return applied
 
@@ -266,22 +283,30 @@ class Warehouse:
     # ------------------------------------------------------------------ panel --
     def panel_counts(self, category: str) -> dict:
         """Сколько активных SKU категории в каждой группе выборки."""
+
         def query(cursor) -> dict:
             cursor.execute(
                 "SELECT sampling_group, count(*) FROM sku_panel "
-                "WHERE is_active AND category = %s GROUP BY sampling_group", (category,))
+                "WHERE is_active AND category = %s GROUP BY sampling_group",
+                (category,),
+            )
             return {group: count for group, count in cursor.fetchall()}
+
         return self.run(query)
 
     def active_panel_skus(self) -> set:
         def query(cursor) -> set:
             cursor.execute("SELECT sku FROM sku_panel WHERE is_active")
             return {row[0] for row in cursor.fetchall()}
+
         return self.run(query)
 
-    def panel_skus(self, categories: Iterable[str] | None = None,
-                   limit: int | None = None,
-                   missing_since: dt.datetime | None = None) -> list:
+    def panel_skus(
+        self,
+        categories: Iterable[str] | None = None,
+        limit: int | None = None,
+        missing_since: dt.datetime | None = None,
+    ) -> list:
         """Активные SKU panel для парсинга: дольше всех не обновлявшиеся - первыми.
 
         Сначала SKU, которые ещё ни разу не пытались разобрать, затем - по
@@ -313,18 +338,30 @@ class Warehouse:
         def query(cursor) -> list:
             cursor.execute(sql, params)
             return [row[0] for row in cursor.fetchall()]
+
         return self.run(query)
 
-    def add_to_panel(self, picks: Iterable[PanelPick], category: str, source: str,
-                     discovery_run_id: int | None) -> int:
+    def add_to_panel(
+        self, picks: Iterable[PanelPick], category: str, source: str, discovery_run_id: int | None
+    ) -> int:
         """Добавляет отобранные SKU. Возвращает число новых или возвращённых в panel.
 
         Активные строки не трогаются (WHERE NOT is_active в upsert): повторный
         discovery не перетасовывает panel.
         """
-        rows = [(p.candidate.sku, category, source, p.candidate.url or None,
-                 p.candidate.position, p.candidate.page, p.group, discovery_run_id)
-                for p in picks]
+        rows = [
+            (
+                p.candidate.sku,
+                category,
+                source,
+                p.candidate.url or None,
+                p.candidate.position,
+                p.candidate.page,
+                p.group,
+                discovery_run_id,
+            )
+            for p in picks
+        ]
 
         def insert(cursor) -> int:
             added = 0
@@ -332,6 +369,7 @@ class Warehouse:
                 cursor.execute(PANEL_UPSERT, row)
                 added += cursor.rowcount
             return added
+
         return self.run(insert)
 
     def touch_seen(self, skus: Iterable[str]) -> int:
@@ -341,27 +379,36 @@ class Warehouse:
             return 0
 
         def update(cursor) -> int:
-            cursor.execute("UPDATE sku_panel SET last_seen_at = now() WHERE sku = ANY(%s)",
-                           (values,))
+            cursor.execute(
+                "UPDATE sku_panel SET last_seen_at = now() WHERE sku = ANY(%s)", (values,)
+            )
             return cursor.rowcount
+
         return self.run(update)
 
     def deactivate_category(self, category: str) -> int:
         """Выключает всю активную panel категории (для discover --rebuild)."""
+
         def update(cursor) -> int:
             cursor.execute(
                 "UPDATE sku_panel SET is_active = FALSE, deactivated_at = now(), "
-                "updated_at = now() WHERE is_active AND category = %s", (category,))
+                "updated_at = now() WHERE is_active AND category = %s",
+                (category,),
+            )
             return cursor.rowcount
+
         return self.run(update)
 
     def panel_summary(self) -> list:
         """Строки (category, sampling_group, active, inactive) для отчёта."""
+
         def query(cursor) -> list:
             cursor.execute(
                 "SELECT category, sampling_group, active_sku, inactive_sku "
-                "FROM v_panel_summary ORDER BY category, sampling_group")
+                "FROM v_panel_summary ORDER BY category, sampling_group"
+            )
             return cursor.fetchall()
+
         return self.run(query)
 
     def export_panel_csv(self, path: Path) -> int:
@@ -378,28 +425,49 @@ class Warehouse:
         def insert(cursor) -> int:
             cursor.execute(
                 "INSERT INTO discovery_runs (category, source, seed) VALUES (%s, %s, %s) "
-                "RETURNING id", (category, source, seed))
+                "RETURNING id",
+                (category, source, seed),
+            )
             return cursor.fetchone()[0]
+
         return self.run(insert)
 
-    def finish_discovery_run(self, run_id: int, status: str, pages_requested: int = 0,
-                             discovered: int = 0, selected_top: int = 0,
-                             selected_tail: int = 0, error_message: str | None = None) -> None:
+    def finish_discovery_run(
+        self,
+        run_id: int,
+        status: str,
+        pages_requested: int = 0,
+        discovered: int = 0,
+        selected_top: int = 0,
+        selected_tail: int = 0,
+        error_message: str | None = None,
+    ) -> None:
         def update(cursor) -> None:
             cursor.execute(
                 "UPDATE discovery_runs SET finished_at = now(), status = %s, "
                 "pages_requested = %s, discovered = %s, selected_top = %s, "
                 "selected_tail = %s, error_message = %s WHERE id = %s",
-                (status, pages_requested, discovered, selected_top, selected_tail,
-                 error_message, run_id))
+                (
+                    status,
+                    pages_requested,
+                    discovered,
+                    selected_top,
+                    selected_tail,
+                    error_message,
+                    run_id,
+                ),
+            )
+
         self.run(update)
 
     # ------------------------------------------------------------ парсинг ------
     def try_parse_lock(self) -> bool:
         """Блокировка «идёт прогон парсера» на время жизни соединения."""
+
         def query(cursor) -> bool:
             cursor.execute("SELECT pg_try_advisory_lock(%s)", (PARSE_LOCK,))
             return bool(cursor.fetchone()[0])
+
         return self.run(query)
 
     def close_stale_runs(self) -> int:
@@ -412,44 +480,67 @@ class Warehouse:
         выключили посреди прогона), поэтому счётчики и время окончания
         восстанавливаются по строкам, которые он успел записать по каждому SKU.
         """
+
         def update(cursor) -> int:
             cursor.execute(STALE_RUNS_UPDATE)
             return cursor.rowcount
+
         return self.run(update)
 
-    def start_parse_run(self, kind: str, sku_source: str, total_sku: int,
-                        request_delay: float) -> int:
+    def start_parse_run(
+        self, kind: str, sku_source: str, total_sku: int, request_delay: float
+    ) -> int:
         def insert(cursor) -> int:
             cursor.execute(
                 "INSERT INTO parse_runs (kind, sku_source, total_sku, request_delay) "
                 "VALUES (%s, %s, %s, %s) RETURNING run_id",
-                (kind, sku_source, total_sku, request_delay))
+                (kind, sku_source, total_sku, request_delay),
+            )
             return cursor.fetchone()[0]
+
         return self.run(insert)
 
-    def finish_parse_run(self, run_id: int, status: str, processed: int, success: int,
-                         errors: int, duration_seconds: float,
-                         sku_per_minute: float | None,
-                         avg_sku_seconds: float | None) -> None:
+    def finish_parse_run(
+        self,
+        run_id: int,
+        status: str,
+        processed: int,
+        success: int,
+        errors: int,
+        duration_seconds: float,
+        sku_per_minute: float | None,
+        avg_sku_seconds: float | None,
+    ) -> None:
         def update(cursor) -> None:
             cursor.execute(
                 "UPDATE parse_runs SET status = %s, finished_at = now(), "
                 "processed_count = %s, success_count = %s, error_count = %s, "
                 "duration_seconds = %s, sku_per_minute = %s, avg_sku_seconds = %s "
                 "WHERE run_id = %s",
-                (status, processed, success, errors, round(duration_seconds, 1),
-                 sku_per_minute, avg_sku_seconds, run_id))
+                (
+                    status,
+                    processed,
+                    success,
+                    errors,
+                    round(duration_seconds, 1),
+                    sku_per_minute,
+                    avg_sku_seconds,
+                    run_id,
+                ),
+            )
+
         self.run(update)
 
-    def record_product(self, run_id: int, product: dict,
-                       collected_at: dt.datetime | None = None) -> None:
+    def record_product(
+        self, run_id: int, product: dict, collected_at: dt.datetime | None = None
+    ) -> None:
         """Сохраняет карточку и наблюдение цены - одной транзакцией."""
-        params = product_params(run_id, product,
-                                collected_at or dt.datetime.now(dt.UTC))
+        params = product_params(run_id, product, collected_at or dt.datetime.now(dt.UTC))
 
         def write(cursor) -> None:
             cursor.execute(PRODUCT_UPSERT, params)
             cursor.execute(PRICE_UPSERT, params)
+
         self.run(write)
 
     def skus_without_details(self, skus: Iterable[str]) -> set:
@@ -463,26 +554,36 @@ class Warehouse:
             cursor.execute(
                 "SELECT s.sku FROM unnest(%s::text[]) AS s(sku) "
                 "LEFT JOIN products p ON p.sku = s.sku "
-                "WHERE p.sku IS NULL OR p.has_rich_content IS NULL", (values,))
+                "WHERE p.sku IS NULL OR p.has_rich_content IS NULL",
+                (values,),
+            )
             return {row[0] for row in cursor.fetchall()}
+
         return self.run(query)
 
-    def record_error(self, run_id: int, sku: str, error_type: str, message: str,
-                     attempts: int | None = None) -> None:
+    def record_error(
+        self, run_id: int, sku: str, error_type: str, message: str, attempts: int | None = None
+    ) -> None:
         def insert(cursor) -> None:
             cursor.execute(
                 "INSERT INTO parse_errors (run_id, sku, error_type, error_message, attempts) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (run_id, sku, error_type, (message or "")[:2000], attempts))
+                (run_id, sku, error_type, (message or "")[:2000], attempts),
+            )
+
         self.run(insert)
 
     def error_counts(self, run_id: int) -> list:
         """Ошибки прогона по типам: [(error_type, число)], самые частые первыми."""
+
         def query(cursor) -> list:
             cursor.execute(
                 "SELECT error_type, count(*) FROM parse_errors WHERE run_id = %s "
-                "GROUP BY error_type ORDER BY count(*) DESC, error_type", (run_id,))
+                "GROUP BY error_type ORDER BY count(*) DESC, error_type",
+                (run_id,),
+            )
             return [tuple(row) for row in cursor.fetchall()]
+
         return self.run(query)
 
     def recent_runs(self, limit: int = 10) -> list:
@@ -490,14 +591,20 @@ class Warehouse:
             cursor.execute(
                 "SELECT run_id, kind, status, started_at, total_sku, success_count, "
                 "error_count, duration_seconds, sku_per_minute, avg_sku_seconds, request_delay "
-                "FROM parse_runs ORDER BY run_id DESC LIMIT %s", (limit,))
+                "FROM parse_runs ORDER BY run_id DESC LIMIT %s",
+                (limit,),
+            )
             return cursor.fetchall()
+
         return self.run(query)
 
     def history_counts(self) -> tuple:
         """(строк в price_history, различных SKU, прогонов с данными)."""
+
         def query(cursor) -> tuple:
             cursor.execute(
-                "SELECT count(*), count(DISTINCT sku), count(DISTINCT run_id) FROM price_history")
+                "SELECT count(*), count(DISTINCT sku), count(DISTINCT run_id) FROM price_history"
+            )
             return tuple(cursor.fetchone())
+
         return self.run(query)

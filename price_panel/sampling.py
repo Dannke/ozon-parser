@@ -93,8 +93,9 @@ def make_rng(seed: str, category: str) -> random.Random:
     return random.Random("{}:{}".format(seed, category))
 
 
-def plan_tail_pages(first: int, last: int, count: int, rng: random.Random,
-                    exclude: Iterable[int] = ()) -> list:
+def plan_tail_pages(
+    first: int, last: int, count: int, rng: random.Random, exclude: Iterable[int] = ()
+) -> list:
     """Случайные номера страниц хвоста из [first, last] без повторов, по возрастанию."""
     skip = set(exclude)
     pool = [page for page in range(first, last + 1) if page not in skip]
@@ -106,11 +107,16 @@ def plan_tail_pages(first: int, last: int, count: int, rng: random.Random,
 def pick_top(candidates: Iterable[Candidate], size: int, exclude: Iterable[str] = ()) -> list:
     """Первые size товаров выдачи, кроме уже известных."""
     skip = set(exclude)
-    return [c for c in dedupe(candidates) if c.sku not in skip][:max(size, 0)]
+    return [c for c in dedupe(candidates) if c.sku not in skip][: max(size, 0)]
 
 
-def pick_tail(candidates: Iterable[Candidate], size: int, rng: random.Random,
-              per_page: int, exclude: Iterable[str] = ()) -> list:
+def pick_tail(
+    candidates: Iterable[Candidate],
+    size: int,
+    rng: random.Random,
+    per_page: int,
+    exclude: Iterable[str] = (),
+) -> list:
     """Случайные товары хвоста: не больше per_page с одной страницы, всего size."""
     if size <= 0:
         return []
@@ -129,9 +135,15 @@ def pick_tail(candidates: Iterable[Candidate], size: int, rng: random.Random,
     return sorted(picked, key=lambda item: (item.position, item.sku))
 
 
-def select_panel(top_candidates: Iterable[Candidate], tail_candidates: Iterable[Candidate],
-                 top_size: int, tail_size: int, rng: random.Random, per_page: int,
-                 exclude: Iterable[str] = ()) -> list:
+def select_panel(
+    top_candidates: Iterable[Candidate],
+    tail_candidates: Iterable[Candidate],
+    top_size: int,
+    tail_size: int,
+    rng: random.Random,
+    per_page: int,
+    exclude: Iterable[str] = (),
+) -> list:
     """Собирает panel категории: сначала top, затем хвост без пересечений с ним.
 
     :param exclude: SKU, которые уже есть в panel (в этой или другой
@@ -141,5 +153,4 @@ def select_panel(top_candidates: Iterable[Candidate], tail_candidates: Iterable[
     top = pick_top(top_candidates, top_size, skip)
     skip.update(c.sku for c in top)
     tail = pick_tail(tail_candidates, tail_size, rng, per_page, skip)
-    return ([PanelPick(c, GROUP_TOP) for c in top]
-            + [PanelPick(c, GROUP_TAIL) for c in tail])
+    return [PanelPick(c, GROUP_TOP) for c in top] + [PanelPick(c, GROUP_TAIL) for c in tail]

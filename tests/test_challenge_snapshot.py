@@ -57,8 +57,11 @@ def test_snapshots_are_limited_per_process(log_dir, monkeypatch):
 
 def test_old_snapshots_are_pruned(log_dir, monkeypatch):
     monkeypatch.setattr(browser, "CHALLENGE_SHOTS_KEEP", 2)
-    for name in ("challenge-20261001-100000.png", "challenge-20261001-110000.png",
-                 "challenge-20261001-120000.png"):
+    for name in (
+        "challenge-20261001-100000.png",
+        "challenge-20261001-110000.png",
+        "challenge-20261001-120000.png",
+    ):
         (log_dir / name).write_bytes(b"old")
     browser.save_challenge_snapshot(cast(Page, StuckChallengePage()))
     remaining = sorted(p.name for p in log_dir.glob("challenge-*.png"))

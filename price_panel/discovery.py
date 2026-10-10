@@ -142,12 +142,14 @@ def parse_listing(data: dict, page: int) -> list:
         sku = sku_from_url(link)
         if sku is None:
             continue
-        candidates.append(Candidate(
-            sku=sku,
-            position=listing_position(page, index, len(items)),
-            page=page,
-            url=urllib.parse.urljoin("https://www.ozon.ru", link.split("?")[0]),
-        ))
+        candidates.append(
+            Candidate(
+                sku=sku,
+                position=listing_position(page, index, len(items)),
+                page=page,
+                url=urllib.parse.urljoin("https://www.ozon.ru", link.split("?")[0]),
+            )
+        )
     return candidates
 
 
@@ -161,13 +163,15 @@ def parse_data_ozon(data: dict, offset: int) -> list:
         if sku is None:
             sku = field_sku
         elif field_sku and field_sku != sku:
-            log.warning("data.ozon.ru: sku=%s расходится со ссылкой %s - беру из ссылки",
-                        field_sku, link)
+            log.warning(
+                "data.ozon.ru: sku=%s расходится со ссылкой %s - беру из ссылки", field_sku, link
+            )
         if sku is None:
             continue
         position = offset + index + 1
-        candidates.append(Candidate(sku=sku, position=position,
-                                    page=offset // DATA_OZON_MAX_LIMIT + 1, url=link))
+        candidates.append(
+            Candidate(sku=sku, position=position, page=offset // DATA_OZON_MAX_LIMIT + 1, url=link)
+        )
     return candidates
 
 
@@ -194,8 +198,13 @@ class ListingSource:
     :param new_page: создаёт вкладку в новом чистом контексте браузера.
     """
 
-    def __init__(self, new_page: Callable[[], Page], delay: float, jitter: float = 0.0,
-                 block_backoff: tuple = ()):
+    def __init__(
+        self,
+        new_page: Callable[[], Page],
+        delay: float,
+        jitter: float = 0.0,
+        block_backoff: tuple = (),
+    ):
         self.new_page = new_page
         self.page = new_page()
         self.delay = delay
@@ -216,8 +225,9 @@ class ListingSource:
         """Открывает страницу категории: без неё API отвечает заглушкой."""
         self._pause()
         try:
-            response = self.page.goto(category.url, wait_until="domcontentloaded",
-                                      timeout=config.PAGE_TIMEOUT)
+            response = self.page.goto(
+                category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
+            )
             if not browser_utils.pass_challenge(self.page, response):
                 raise DiscoveryError("{}: антибот-проверка не прошла".format(category.name))
             self.page.wait_for_timeout(config.PAGE_SETTLE_MS)
@@ -228,16 +238,20 @@ class ListingSource:
         try:
             self.open(category)
         except (DiscoveryError, PlaywrightError) as exc:
-            log.warning("%s: не удалось заново открыть категорию: %s",
-                        category.name, str(exc).splitlines()[0])
+            log.warning(
+                "%s: не удалось заново открыть категорию: %s",
+                category.name,
+                str(exc).splitlines()[0],
+            )
 
     def _request(self, category: CategoryConfig, page_number: int) -> tuple:
         """Один запрос страницы: (товары или None, причина неудачи, отказ Ozon?)."""
         self._pause()
         self.requests += 1
         try:
-            result = self.page.evaluate(FETCH_JSON_JS,
-                                        listing_api_url(category.listing_path, page_number))
+            result = self.page.evaluate(
+                FETCH_JSON_JS, listing_api_url(category.listing_path, page_number)
+            )
         except PlaywrightError as exc:
             return None, str(exc).splitlines()[0], False
         finally:
@@ -271,26 +285,46 @@ class ListingSource:
             if blocked:
                 if blocks >= len(self.block_backoff):
                     self.blocked = True
-                    log.error("%s: Ozon ограничил запросы (%s) и не снял ограничение - "
-                              "discovery остановлен, найденное сохраняется",
-                              category.name, reason)
+                    log.error(
+                        "%s: Ozon ограничил запросы (%s) и не снял ограничение - "
+                        "discovery остановлен, найденное сохраняется",
+                        category.name,
+                        reason,
+                    )
                     return None
                 wait = self.block_backoff[blocks]
                 blocks += 1
-                log.warning("%s: страница %s: Ozon ограничил запросы (%s), жду %.0f с и "
-                            "повторяю в новой сессии браузера (ожидание %s из %s)",
-                            category.name, page_number, reason, wait, blocks,
-                            len(self.block_backoff))
+                log.warning(
+                    "%s: страница %s: Ozon ограничил запросы (%s), жду %.0f с и "
+                    "повторяю в новой сессии браузера (ожидание %s из %s)",
+                    category.name,
+                    page_number,
+                    reason,
+                    wait,
+                    blocks,
+                    len(self.block_backoff),
+                )
                 time.sleep(wait)
                 self.page = self.new_page()
             else:
                 errors += 1
                 if errors > config.MAX_RETRIES:
-                    log.warning("%s: страница %s пропущена после %s попыток (%s)",
-                                category.name, page_number, errors, reason)
+                    log.warning(
+                        "%s: страница %s пропущена после %s попыток (%s)",
+                        category.name,
+                        page_number,
+                        errors,
+                        reason,
+                    )
                     return None
-                log.warning("%s: страница %s не получена (%s), повтор %s из %s",
-                            category.name, page_number, reason, errors, config.MAX_RETRIES)
+                log.warning(
+                    "%s: страница %s не получена (%s), повтор %s из %s",
+                    category.name,
+                    page_number,
+                    reason,
+                    errors,
+                    config.MAX_RETRIES,
+                )
                 time.sleep(self.delay * errors)
             # Заново открытая категория: без неё API отвечает заглушкой, и так
             # же проходит антибот-проверка.
@@ -309,15 +343,17 @@ class DataOzonSource:
     def open(self) -> None:
         if self.opened:
             return
-        response = self.page.goto(DATA_OZON_APP_URL, wait_until="domcontentloaded",
-                                  timeout=config.PAGE_TIMEOUT)
+        response = self.page.goto(
+            DATA_OZON_APP_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
+        )
         if not browser_utils.pass_challenge(self.page, response):
             raise DiscoveryError("data.ozon.ru: антибот-проверка не прошла")
         self.page.wait_for_timeout(5_000)
         if "sso.ozon.ru" in self.page.url or "/login" in self.page.url:
             raise DiscoveryError(
                 "data.ozon.ru просит войти заново - сессия в {} недействительна. "
-                "Обновите её: python get_cookies.py --force".format(config.COOKIES_FILE.name))
+                "Обновите её: python get_cookies.py --force".format(config.COOKIES_FILE.name)
+            )
         self.opened = True
 
     def fetch(self, category: CategoryConfig, offset: int, limit: int) -> tuple:
@@ -337,11 +373,15 @@ class DataOzonSource:
         except json.JSONDecodeError:
             data = {}
         if status in (401, 403):
-            raise DiscoveryError("data.ozon.ru ответил HTTP {} - нужна сессия: "
-                                 "python get_cookies.py --force".format(status))
+            raise DiscoveryError(
+                "data.ozon.ru ответил HTTP {} - нужна сессия: python get_cookies.py --force".format(
+                    status
+                )
+            )
         if status != 200:
-            raise DiscoveryError("data.ozon.ru ответил HTTP {}: {}".format(
-                status, data.get("message") or text[:200]))
+            raise DiscoveryError(
+                "data.ozon.ru ответил HTTP {}: {}".format(status, data.get("message") or text[:200])
+            )
         return parse_data_ozon(data, offset), int(data.get("totals") or 0)
 
 
@@ -359,8 +399,14 @@ class ListingCrawl:
     skipped_pages: int = 0
 
 
-def discover_listing(source: ListingSource, category: CategoryConfig, top_needed: int,
-                     tail_needed: int, exclude: set, rng) -> ListingCrawl:
+def discover_listing(
+    source: ListingSource,
+    category: CategoryConfig,
+    top_needed: int,
+    tail_needed: int,
+    exclude: set,
+    rng,
+) -> ListingCrawl:
     """Собирает кандидатов top и хвоста.
 
     Не падает на середине: если Ozon ограничил запросы, возвращает то, что
@@ -388,8 +434,12 @@ def discover_listing(source: ListingSource, category: CategoryConfig, top_needed
         if not items:
             last_page = page_number - 1
             break
-        log.info("SKU DISCOVERED category=%s page=%s group=top found=%s",
-                 category.name, page_number, len(items))
+        log.info(
+            "SKU DISCOVERED category=%s page=%s group=top found=%s",
+            category.name,
+            page_number,
+            len(items),
+        )
         crawl.top.extend(items)
 
     # Хвост: случайные страницы глубже top. Пустая страница значит, что выдача
@@ -430,8 +480,12 @@ def discover_listing(source: ListingSource, category: CategoryConfig, top_needed
                 last = number - 1
                 log.info("%s: выдача кончается раньше страницы %s", category.name, number)
                 continue
-            log.info("SKU DISCOVERED category=%s page=%s group=tail found=%s",
-                     category.name, number, len(items))
+            log.info(
+                "SKU DISCOVERED category=%s page=%s group=tail found=%s",
+                category.name,
+                number,
+                len(items),
+            )
             crawl.tail.extend(items)
 
     crawl.blocked = source.blocked
@@ -447,8 +501,13 @@ def discover_data_ozon(source: DataOzonSource, category: CategoryConfig) -> tupl
     while offset < DATA_OZON_WINDOW:
         items, reported = source.fetch(category, offset, DATA_OZON_MAX_LIMIT)
         totals = reported if totals is None else totals
-        log.info("SKU DISCOVERED category=%s offset=%s found=%s totals=%s",
-                 category.name, offset, len(items), reported)
+        log.info(
+            "SKU DISCOVERED category=%s offset=%s found=%s totals=%s",
+            category.name,
+            offset,
+            len(items),
+            reported,
+        )
         candidates.extend(items)
         offset += DATA_OZON_MAX_LIMIT
         if not items or offset >= min(totals or 0, DATA_OZON_WINDOW):
@@ -463,8 +522,10 @@ def _needed(wh: Warehouse, category: CategoryConfig, rebuild: bool) -> tuple:
     if rebuild:
         return category.top_size, category.tail_size
     counts = wh.panel_counts(category.name)
-    return (max(category.top_size - counts.get(GROUP_TOP, 0), 0),
-            max(category.tail_size - counts.get(GROUP_TAIL, 0), 0))
+    return (
+        max(category.top_size - counts.get(GROUP_TOP, 0), 0),
+        max(category.tail_size - counts.get(GROUP_TAIL, 0), 0),
+    )
 
 
 class BrowserSessions:
@@ -495,19 +556,31 @@ class BrowserSessions:
             self.context = None
 
 
-def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfig,
-                      sessions: BrowserSessions, rebuild: bool = False) -> CategoryResult:
+def discover_category(
+    wh: Warehouse,
+    settings: Settings,
+    category: CategoryConfig,
+    sessions: BrowserSessions,
+    rebuild: bool = False,
+) -> CategoryResult:
     """Обходит одну категорию в новой сессии браузера и дописывает её panel."""
     result = CategoryResult(category=category)
     top_needed, tail_needed = _needed(wh, category, rebuild)
-    log.info("CATEGORY START category=%s source=%s panel_size=%s need_top=%s need_tail=%s",
-             category.name, category.source, category.panel_size, top_needed, tail_needed)
+    log.info(
+        "CATEGORY START category=%s source=%s panel_size=%s need_top=%s need_tail=%s",
+        category.name,
+        category.source,
+        category.panel_size,
+        top_needed,
+        tail_needed,
+    )
 
     if top_needed == 0 and tail_needed == 0:
         result.status = "skipped"
         result.note = "panel уже собрана"
-        log.info("%s: panel уже собрана (%s SKU) - обход не нужен",
-                 category.name, category.panel_size)
+        log.info(
+            "%s: panel уже собрана (%s SKU) - обход не нужен", category.name, category.panel_size
+        )
         return result
 
     # Уже активные SKU (в любой категории) повторно не берём. При пересборке
@@ -530,13 +603,17 @@ def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfi
             # сессии устаревает раньше своего срока (так data.ozon.ru и выкинул
             # на вход во время разведки).
             if sessions.context is not None and session.has_auth_cookies(
-                    sessions.context.cookies()):
+                sessions.context.cookies()
+            ):
                 session.save_session(sessions.context, config.COOKIES_FILE)
         else:
             discovery_settings = settings.discovery
-            source = ListingSource(sessions.new_page, discovery_settings.request_delay,
-                                   discovery_settings.request_jitter,
-                                   discovery_settings.block_backoff)
+            source = ListingSource(
+                sessions.new_page,
+                discovery_settings.request_delay,
+                discovery_settings.request_jitter,
+                discovery_settings.block_backoff,
+            )
             crawl = discover_listing(source, category, top_needed, tail_needed, exclude, rng)
             top, tail, result.listing_depth = crawl.top, crawl.tail, crawl.depth
             per_page = category.tail_items_per_page
@@ -562,16 +639,25 @@ def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfi
 
         shortfall = (top_needed - result.selected_top) + (tail_needed - result.selected_tail)
         if result.status == "blocked":
-            notes.insert(0, "Ozon ограничил запросы: сохранено {} SKU, недостающие {} доберёт "
-                            "повторный discover".format(result.selected, shortfall))
+            notes.insert(
+                0,
+                "Ozon ограничил запросы: сохранено {} SKU, недостающие {} доберёт "
+                "повторный discover".format(result.selected, shortfall),
+            )
         elif shortfall > 0:
             notes.append("не хватило кандидатов: {} SKU".format(shortfall))
             log.warning("%s: не хватило кандидатов: %s SKU", category.name, shortfall)
         result.note = "; ".join(notes)
         # В discovery_runs частичный обход - failed с объяснением в error_message.
-        wh.finish_discovery_run(run_id, "failed" if result.status == "blocked" else "success",
-                                result.pages_requested, result.discovered,
-                                result.selected_top, result.selected_tail, result.note or None)
+        wh.finish_discovery_run(
+            run_id,
+            "failed" if result.status == "blocked" else "success",
+            result.pages_requested,
+            result.discovered,
+            result.selected_top,
+            result.selected_tail,
+            result.note or None,
+        )
     except (DiscoveryError, PlaywrightError) as exc:
         result.status = "failed"
         result.note = str(exc).splitlines()[0]
@@ -580,13 +666,21 @@ def discover_category(wh: Warehouse, settings: Settings, category: CategoryConfi
     return result
 
 
-def run_discovery(wh: Warehouse, settings: Settings, names: list | None = None,
-                  rebuild: bool = False) -> list:
+def run_discovery(
+    wh: Warehouse, settings: Settings, names: list | None = None, rebuild: bool = False
+) -> list:
     """Этап discovery целиком. Возвращает CategoryResult по каждой категории."""
-    categories = [settings.category(name) for name in names] if names else list(
-        settings.discovery.categories)
-    log.info("DISCOVERY START categories=%s rebuild=%s seed=%s",
-             ",".join(c.name for c in categories), rebuild, settings.discovery.seed)
+    categories = (
+        [settings.category(name) for name in names]
+        if names
+        else list(settings.discovery.categories)
+    )
+    log.info(
+        "DISCOVERY START categories=%s rebuild=%s seed=%s",
+        ",".join(c.name for c in categories),
+        rebuild,
+        settings.discovery.seed,
+    )
 
     state = None
     if config.COOKIES_FILE.exists():
@@ -600,11 +694,16 @@ def run_discovery(wh: Warehouse, settings: Settings, names: list | None = None,
     pending = []
     for category in categories:
         if not rebuild and _needed(wh, category, False) == (0, 0):
-            log.info("CATEGORY START category=%s: panel уже собрана (%s SKU) - пропускаю",
-                     category.name, category.panel_size)
+            log.info(
+                "CATEGORY START category=%s: panel уже собрана (%s SKU) - пропускаю",
+                category.name,
+                category.panel_size,
+            )
             results[category.name] = CategoryResult(
-                category=category, status="skipped",
-                note="panel уже собрана ({} SKU)".format(category.panel_size))
+                category=category,
+                status="skipped",
+                note="panel уже собрана ({} SKU)".format(category.panel_size),
+            )
         else:
             pending.append(category)
 
@@ -619,17 +718,21 @@ def run_discovery(wh: Warehouse, settings: Settings, names: list | None = None,
                         # Ozon ограничил запросы даже в новой сессии: следующая
                         # категория только продлила бы блокировку.
                         results[category.name] = CategoryResult(
-                            category=category, status="stopped", note=stop_note)
+                            category=category, status="stopped", note=stop_note
+                        )
                         continue
                     if index and settings.discovery.category_pause:
-                        log.info("Пауза между категориями: %.0f с",
-                                 settings.discovery.category_pause)
+                        log.info(
+                            "Пауза между категориями: %.0f с", settings.discovery.category_pause
+                        )
                         time.sleep(settings.discovery.category_pause)
                     result = discover_category(wh, settings, category, sessions, rebuild)
                     results[category.name] = result
                     if result.status == "blocked":
-                        stop_note = ("не запускалась: Ozon ограничил запросы - повторите "
-                                     "discover через 30-60 минут")
+                        stop_note = (
+                            "не запускалась: Ozon ограничил запросы - повторите "
+                            "discover через 30-60 минут"
+                        )
             finally:
                 sessions.close()
                 browser_utils.close_quietly(browser)

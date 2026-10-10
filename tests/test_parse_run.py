@@ -16,8 +16,7 @@ def saved(monkeypatch):
     """Подменяет сессию и хранилище; возвращает список сохранённых срезов."""
     snapshots: list = []
     monkeypatch.setattr(session, "load_session", lambda path: {"cookies": []})
-    monkeypatch.setattr(storage, "save",
-                        lambda rows, **kwargs: snapshots.append(list(rows)))
+    monkeypatch.setattr(storage, "save", lambda rows, **kwargs: snapshots.append(list(rows)))
     monkeypatch.setattr(config, "MAX_BROWSER_RESTARTS", 2)
     return snapshots
 
@@ -52,6 +51,7 @@ def test_crashed_browser_is_restarted_and_sku_retried(monkeypatch, saved):
 
 def test_restarts_are_limited(monkeypatch, saved):
     """Браузер, который падает раз за разом, не перезапускается бесконечно."""
+
     def always_crash(progress, state, total, flush_batch):
         raise RuntimeError("Connection closed while reading from the driver")
 
@@ -69,13 +69,15 @@ def test_success_rate_counts_unprocessed_skus(monkeypatch, saved):
     assert [row["sku"] for row in saved[-1]] == ["1"]
 
 
-@pytest.mark.parametrize("interval, since_last_open, expected", [
-    (6.5, 3.8, [2.7]),  # быстрый разбор (html) + пауза 3 с: ждём до 6,5 с от прошлой карточки
-    (6.5, 6.6, []),     # обычный разбор (api) уже дольше предела - не ждём
-    (0.0, 3.8, []),     # предел выключен
-])
-def test_pages_open_no_faster_than_page_interval(monkeypatch, interval, since_last_open,
-                                                 expected):
+@pytest.mark.parametrize(
+    "interval, since_last_open, expected",
+    [
+        (6.5, 3.8, [2.7]),  # быстрый разбор (html) + пауза 3 с: ждём до 6,5 с от прошлой карточки
+        (6.5, 6.6, []),  # обычный разбор (api) уже дольше предела - не ждём
+        (0.0, 3.8, []),  # предел выключен
+    ],
+)
+def test_pages_open_no_faster_than_page_interval(monkeypatch, interval, since_last_open, expected):
     """07.10.2026: та же пауза 3 с при быстром разборе дала ~14 карточек в минуту и капчу."""
     slept: list = []
     monkeypatch.setattr(config, "PAGE_INTERVAL", interval)

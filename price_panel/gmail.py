@@ -48,8 +48,9 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 # Границы слова и числа обязательны: без них "barcode 12345678" дал бы код
 # 123456, а "shipping" сошёл бы за "pin".
 KEYWORD_CODE_PATTERNS: tuple[re.Pattern, ...] = (
-    re.compile(r"\b(?:код(?:\s+подтверждения)?|code|pin)\b\D{0,20}?(?<!\d)(\d{4,6})(?!\d)",
-               re.IGNORECASE),
+    re.compile(
+        r"\b(?:код(?:\s+подтверждения)?|code|pin)\b\D{0,20}?(?<!\d)(\d{4,6})(?!\d)", re.IGNORECASE
+    ),
     re.compile(r"(?<!\d)(\d{4,6})(?!\d)\s*[-:—]?\s*(?:ваш\s+)?код\b", re.IGNORECASE),
 )
 
@@ -338,8 +339,9 @@ class GmailCodeReader:
             log.warning("Не удалось прочитать письмо %s: %s", message_id, exc)
             return None
 
-    def _code_from_messages(self, messages: Iterable, since_ms: int,
-                            seen: set | None = None) -> str | None:
+    def _code_from_messages(
+        self, messages: Iterable, since_ms: int, seen: set | None = None
+    ) -> str | None:
         """Проверяет письма (от новых к старым) и возвращает первый найденный код.
 
         Идентификаторы просмотренных писем складываются в ``seen``, чтобы
@@ -371,8 +373,9 @@ class GmailCodeReader:
                 if recipients and self.settings.recipient.lower() not in recipients:
                     continue
 
-            headline = " ".join(part for part in (headers.get("subject", ""),
-                                                  message.get("snippet", "")) if part)
+            headline = " ".join(
+                part for part in (headers.get("subject", ""), message.get("snippet", "")) if part
+            )
             code = self.extract_code(self._collect_text(payload), headline=headline)
             if code:
                 log.info("Код найден в письме от %s", headers.get("from", "?"))
@@ -409,8 +412,9 @@ class GmailCodeReader:
                 messages = self._search_messages(query)
             except GmailTransientError as exc:
                 backoff = min(backoff * 2 or self.settings.poll_interval, MAX_BACKOFF_SECONDS)
-                log.warning("Попытка %s: временная ошибка Gmail (%s), жду %s с",
-                            attempt, exc, backoff)
+                log.warning(
+                    "Попытка %s: временная ошибка Gmail (%s), жду %s с", attempt, exc, backoff
+                )
                 time.sleep(backoff)
                 continue
             backoff = 0
