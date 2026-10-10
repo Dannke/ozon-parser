@@ -302,3 +302,87 @@ def test_exported_panel_is_readable_by_legacy_parser(wh):
         assert wh.export_panel_csv(path) == 2
         assert path.read_text(encoding="utf-8").splitlines()[0] == "sku"
         assert sorted(read_skus_file(path)) == ["111111", "222222"]
+
+
+# ------------------------------------------------ несколько маркетплейсов --
+@pytest.fixture
+def wb(wh):
+    """Хранилище второго маркетплейса на той же тестовой базе."""
+    wh.run(lambda cursor: cursor.execute("INSERT INTO marketplaces VALUES ('wb', 'Wildberries')"))
+    store = Warehouse(TEST_DSN, marketplace="wb")
+    yield store
+    store.close()
+
+
+def test_existing_rows_are_ozon_and_marketplace_has_no_default(wh):
+    """Миграция 0004 записала историю за Ozon; новую строку без маркетплейса база не примет."""
+    wh.add_to_panel(picks("1"), "phones", "ozon_listing", None)
+
+    def marketplace_of_panel(cursor):
+        cursor.execute("SELECT marketplace FROM sku_panel")
+        return [row[0] for row in cursor.fetchall()]
+
+    assert wh.run(marketplace_of_panel) == ["ozon"]
+    with pytest.raises(warehouse.db.DatabaseError, match="marketplace"):
+        wh.run(
+            lambda cursor: cursor.execute(
+                "INSERT INTO sku_panel (sku, category, source, sampling_group) "
+                "VALUES ('2', 'phones', 'ozon_listing', 'top')"
+            )
+        )
+
+
+def test_marketplaces_do_not_see_each_others_rows(wh, wb):
+    """Один и тот же артикул на двух маркетплейсах - два разных товара."""
+    wh.add_to_panel(picks("1", "2"), "phones", "ozon_listing", None)
+    wb.add_to_panel(picks("1"), "phones", "wb_catalog", None)
+    at = dt.datetime(2026, 10, 10, 3, 0, tzinfo=dt.UTC)
+    wh.record_product(wh.start_parse_run("daily", "panel", 2, 3.0), PRODUCT | {"sku": "1"}, at)
+    wb.record_product(wb.start_parse_run("daily", "panel", 1, 3.0), PRODUCT | {"sku": "1"}, at)
+
+    assert set(wh.panel_skus()) == {"1", "2"} and wb.panel_skus() == ["1"]
+    assert wh.panel_counts("phones") == {GROUP_TOP: 2} and wb.panel_counts("phones") == {
+        GROUP_TOP: 1
+    }
+    assert wh.history_counts() == (1, 1, 1) and wb.history_counts() == (1, 1, 1)
+    assert [row[0] for row in wb.recent_runs()] == [2]
+    # Сегодня собран "1" у Ozon - у WB "1" всё равно нет в очереди только потому,
+    # что он собран у самого WB, а не у Ozon.
+    assert wh.panel_skus(missing_since=at) == ["2"]
+    assert wb.panel_skus(missing_since=at) == []
+
+    def latest(cursor):
+        cursor.execute("SELECT marketplace, sku FROM v_price_latest ORDER BY marketplace")
+        return cursor.fetchall()
+
+    assert wh.run(latest) == [("ozon", "1"), ("wb", "1")]
+
+
+def test_runs_and_locks_of_marketplaces_are_independent(wh, wb):
+    """Прогон WB не ждёт Ozon и не помечает его живой прогон брошенным."""
+    running = wh.start_parse_run("daily", "panel", 5, 3.0)
+    other_ozon = Warehouse(TEST_DSN)
+    try:
+        assert wh.try_parse_lock() is True
+        assert wb.try_parse_lock() is True
+        assert other_ozon.try_parse_lock() is False
+        assert wb.close_stale_runs() == 0
+    finally:
+        other_ozon.close()
+
+    def status(cursor):
+        cursor.execute("SELECT status FROM parse_runs WHERE run_id = %s", (running,))
+        return cursor.fetchone()[0]
+
+    assert wh.run(status) == "running"
+
+
+def test_observation_cannot_land_in_another_marketplaces_run(wh, wb):
+    """Составной внешний ключ: наблюдение WB в прогон Ozon база не пропустит."""
+    ozon_run = wh.start_parse_run("daily", "panel", 1, 3.0)
+    # Первой срабатывает карточка (products_last_run_fkey), наблюдение - следом.
+    with pytest.raises(warehouse.db.DatabaseError, match="_run_fkey"):
+        wb.record_product(ozon_run, PRODUCT, dt.datetime(2026, 10, 10, tzinfo=dt.UTC))
+    assert wb.history_counts() == (0, 0, 0) and wh.history_counts() == (0, 0, 0)
+    with pytest.raises(warehouse.db.DatabaseError, match="parse_errors_run_fkey"):
+        wb.record_error(ozon_run, "1", "fetch_error", "403", 1)

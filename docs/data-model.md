@@ -24,16 +24,22 @@ advisory lock и одной транзакцией. Любая команда `p
 | `0001_pipeline_schema`            | Таблицы конвейера                                     |
 | `0002_analytics_views`            | Аналитические представления                           |
 | `0003_parse_run_blocked_status`   | Статус прогона `blocked` (сработал предохранитель)    |
+| `0004_multi_marketplace`          | Колонка `marketplace` во всех таблицах конвейера, справочник `marketplaces`, составные ключи, `parse_runs.region`; представления — с `marketplace` |
 
 Как добавить миграцию — в [development.md](development.md#миграции).
 
 ## Таблицы
 
+Во всех таблицах ниже есть колонка `marketplace` — код маркетплейса из
+справочника `marketplaces` (сейчас там только `ozon`). Всё собранное до
+миграции `0004` — Ozon.
+
 | Таблица          | Что хранит                                                              |
 | ---------------- | ----------------------------------------------------------------------- |
-| `sku_panel`      | Panel: `sku` (уникален), `category`, `source`, `source_url`, `position`, `page`, `sampling_group` (`top` / `tail_random`), `is_active`, `first_seen_at` / `last_seen_at` (когда discovery видел товар в выдаче), `created_at`, `updated_at`, `deactivated_at` |
+| `marketplaces`   | Справочник маркетплейсов: `code` (`ozon`), `title` |
+| `sku_panel`      | Panel: `sku` (уникален внутри маркетплейса), `category`, `source`, `source_url`, `position`, `page`, `sampling_group` (`top` / `tail_random`), `is_active`, `first_seen_at` / `last_seen_at` (когда discovery видел товар в выдаче), `created_at`, `updated_at`, `deactivated_at` |
 | `discovery_runs` | Запуски discovery: категория, источник, seed, запросов, найдено, отобрано, статус и причина неудачи |
-| `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay` |
+| `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay`, `region` (регион сбора: у Ozon пусто — регион он определяет по IP, см. issue #4) |
 | `products`       | Последние атрибуты карточки: название, картинка, цвет, материал, комплектация, фото/видео, rich-контент |
 | `price_history`  | Наблюдение на момент сбора: `collected_at`, `price`, `card_price` (с Ozon Картой), `old_price` (зачёркнутая), `discount_pct`, `is_available`, `rating`, `reviews_total`, `source`, `run_id` |
 | `parse_errors`   | Ошибка по SKU: `run_id`, `sku`, `occurred_at`, `error_type`, `error_message`, `attempts` |
@@ -61,13 +67,24 @@ advisory lock и одной транзакцией. Любая команда `p
 - `collected_at` — момент разбора карточки, а не дата запуска и не имя файла;
 - история не перезаписывается: ключ `(run_id, sku)`. Новый прогон — новые
   строки. Повтор записи внутри того же прогона обновляет ту же строку;
+- несколько маркетплейсов — в одних таблицах
+  ([ADR 0002](adr/0002-multi-marketplace-data.md)). Товар — это пара
+  `(marketplace, sku)`: ключ `products` и уникальность в `sku_panel` составные,
+  потому что артикулы разных маркетплейсов могут совпасть;
+- составные внешние ключи `(run_id, marketplace)` не дают записать
+  наблюдение, ошибку или карточку в прогон другого маркетплейса. У колонки
+  `marketplace` нет значения по умолчанию: запись без неё падает;
+- хранилище конвейера (`Warehouse`) привязано к маркетплейсу: очередь panel,
+  закрытие брошенных прогонов, блокировка прогона и отчёты — только по его
+  строкам. Прогоны разных маркетплейсов друг друга не ждут;
 - описание и полные характеристики (`has_rich_content`, `art_set`, `color`,
   `material`) приходят не в каждом прогоне, а раз в
   `parser.details_refresh_days` дней (см.
   [architecture.md](architecture.md#как-устроен-парсинг-карточки)). Запись
   без них не затирает известные значения пустыми (`COALESCE`), поэтому в
   `products` они могут отставать от сайта на эти дни;
-- два прогона парсера одновременно невозможны (`pg_try_advisory_lock`), а
+- два прогона парсера одного маркетплейса одновременно невозможны
+  (`pg_try_advisory_lock`), а
   прогон, брошенный упавшим процессом (например, компьютер выключили),
   помечается `interrupted` при старте следующего. Его счётчики и время
   окончания восстанавливаются по уже записанным строкам `price_history` и
@@ -84,6 +101,11 @@ advisory lock и одной транзакцией. Любая команда `p
 | `v_category_daily`   | Как меняются цены внутри категории: средняя и медианная цена, доля SKU с изменением цены, средняя скидка, доля в наличии |
 | `v_panel_summary`    | Сколько SKU в каждой категории и группе выборки                     |
 | `v_parse_runs`       | Запуски парсера с долей успеха и скоростью                          |
+
+У каждого представления последняя колонка — `marketplace`: окна, соединения и
+группировки считаются внутри маркетплейса. Пока маркетплейс один, прежние
+запросы работают как раньше; когда их станет несколько, группируйте и
+фильтруйте по `marketplace`.
 
 Для аналитиков и BI-инструментов есть роль только для чтения `analyst` со
 своей схемой `analytics` для собственных представлений (см.
