@@ -3,8 +3,8 @@
 Сделано для docker-compose: контейнер parser живёт постоянно и раз в сутки
 (schedule.daily_at) выполняет те же шаги, что Airflow DAG:
 
-    оповещение о начале  ->  ensure_session (если включён)  ->  parse (panel)
-    ->  backup  ->  оповещение об итоге
+    сеть (DNS)  ->  оповещение о начале  ->  ensure_session (если включён)  ->  parse
+    (panel)  ->  backup  ->  оповещение об итоге
 
 Если Ozon остановил прогон (parse вышел с кодом EXIT_BLOCKED), прогон
 повторяется через schedule.block_retry_delay_hours, не больше
@@ -26,6 +26,7 @@ Airflow DAG (dags/ozon_parser_dag.py) остаётся рабочим вариа
 from __future__ import annotations
 
 import datetime as dt
+import socket
 import subprocess
 import sys
 import time
@@ -56,6 +57,13 @@ BACKUP_TIMEOUT_SECONDS = 2 * backup.TIMEOUT_SECONDS + 60
 # Сколько последних прогонов просматривать в поисках сегодняшнего daily для
 # итога: между ним и концом задачи бывают ручные parse и benchmark.
 RECENT_RUNS_FOR_SUMMARY = 10
+
+# Перед прогоном ждём сеть: 10.10.2026 компьютер включился за три минуты до
+# запуска, Wi-Fi ещё не поднялся, и без DNS прогон за 86 с закончился ничем, а
+# сообщения в Telegram не ушли. Сеть есть, когда разрешается адрес Ozon.
+NETWORK_HOST = "www.ozon.ru"
+NETWORK_WAIT_SECONDS = 30 * 60
+NETWORK_POLL_SECONDS = 60
 
 
 def get_timezone(name: str) -> dt.tzinfo:
@@ -137,6 +145,27 @@ def _run_steps(settings: Settings, deadline: float, clock) -> int:
     return code
 
 
+def wait_for_network(clock=time.time, sleep=time.sleep) -> bool:
+    """Ждёт, пока NETWORK_HOST разрешается в DNS, не дольше NETWORK_WAIT_SECONDS.
+
+    False - сеть так и не появилась; прогон всё равно запускается, и его
+    неудача попадёт в учёт и в оповещение.
+    """
+    give_up = clock() + NETWORK_WAIT_SECONDS
+    while True:
+        try:
+            socket.getaddrinfo(NETWORK_HOST, 443)
+            return True
+        except OSError as exc:
+            if clock() >= give_up:
+                log.error("Сети нет %s мин: %s не разрешается (%s) - запускаю прогон как есть",
+                          NETWORK_WAIT_SECONDS // 60, NETWORK_HOST, exc)
+                return False
+            log.warning("Сети нет: %s не разрешается (%s) - жду %s с",
+                        NETWORK_HOST, exc, NETWORK_POLL_SECONDS)
+            sleep(NETWORK_POLL_SECONDS)
+
+
 def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
     """Один ежедневный прогон с повторами после блокировки, копией базы и оповещениями.
 
@@ -144,8 +173,10 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
     его не меняют.
     """
     schedule = settings.schedule
-    notify.report_start(details=lambda: start_details(settings))
+    # Ожидание сети входит в общий предел прогона: задача Windows его не превысит.
     deadline = clock() + schedule.parse_timeout_hours * 3600
+    wait_for_network(clock, sleep)
+    notify.report_start(details=lambda: start_details(settings))
     code = _run_steps(settings, deadline, clock)
     for attempt in range(1, schedule.block_retries + 1):
         if code != EXIT_BLOCKED:
