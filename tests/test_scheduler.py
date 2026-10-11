@@ -339,7 +339,7 @@ def run_schedule(monkeypatch, *argv) -> list:
     """python -m price_panel schedule при недоступной базе; что ушло в report_failure."""
     from price_panel import __main__ as cli
 
-    def broken():
+    def broken(**kwargs):
         raise DatabaseError("Ошибка PostgreSQL: connection refused")
 
     failures: list = []

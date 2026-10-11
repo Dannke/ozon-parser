@@ -176,3 +176,30 @@ def test_block_retry_defaults_and_limits():
         data["schedule"][key] = value
         with pytest.raises(SettingsError, match=key):
             parse_settings(data)
+
+
+def test_wildberries_defaults_and_repository_config():
+    """Без раздела WB выключен; в config.yaml - Новосибирск и тоже выключен.
+
+    Включать сбор WB - только когда ozon-market-analytics различает маркетплейсы.
+    """
+    assert parse_settings(VALID).wb == settings_module.WildberriesSettings()
+    wb = load_settings(settings_module.DEFAULT_PATH).wb
+    assert (wb.enabled, wb.dest, wb.batch_size) == (False, "-365341", 100)
+    assert wb.request_delay >= 3
+
+
+@pytest.mark.parametrize(
+    ("wb", "message"),
+    [
+        ("yes", "словарём"),
+        ({"dest": "Новосибирск"}, "целое число"),
+        ({"enabled": True}, "dest"),
+        ({"dest": "-1", "batch_size": 0}, "batch_size"),
+        ({"dest": "-1", "batch_size": 101}, "batch_size"),
+        ({"dest": "-1", "request_delay": 1}, "request_delay"),
+    ],
+)
+def test_invalid_wildberries(wb, message):
+    with pytest.raises(SettingsError, match=message):
+        parse_settings(dict(VALID, marketplaces={"wb": wb}))

@@ -75,6 +75,14 @@ source_modules = [
 ]
 forbidden_modules = ["price_panel.legacy"]
 
+[[tool.importlinter.contracts]]
+name = "Маркетплейсы не зависят друг от друга"
+type = "independence"
+modules = [
+    "price_panel.marketplaces.ozon",
+    "price_panel.marketplaces.wb",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Короткая трассировка: в тестах-фикстурах длинная только мешает читать.
