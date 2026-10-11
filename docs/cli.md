@@ -19,7 +19,7 @@ python -m price_panel [--config PATH] <команда> [флаги]
 | Команда     | Флаги | Что делает |
 | ----------- | ----- | ---------- |
 | `migrate`   | — | Применить миграции схемы (делается и автоматически) |
-| `discover`  | `--category NAME` (можно повторять), `--rebuild` | Найти SKU и дописать `sku_panel` до `panel_size` каждой категории. `--rebuild` пересобирает panel заново: старая выключается (`is_active = false`) |
+| `discover`  | `--category NAME` (можно повторять), `--rebuild`, `--marketplace ozon\|wb` | Найти SKU и дописать `sku_panel` до `panel_size` каждой категории. `--rebuild` пересобирает panel заново: старая выключается (`is_active = false`). Panel WB в CSV (`discovery.export_csv`) не выгружается: этот файл — вход `parse_ozon.py` |
 | `panel`     | `--export PATH`, `--marketplace ozon\|wb` | Состав panel по категориям и группам; `--export` выгружает активные SKU в CSV |
 | `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily`, `--missing-today`, `--marketplace ozon\|wb` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик. `--missing-today` — только SKU panel, у которых за сегодня (по `schedule.timezone`) ещё нет успешного наблюдения: догон после блокировки; если таких нет — код 0 без прогона |
 | `benchmark` | `--sample N`, `--seed S`, `--file PATH` | Замер скорости на случайных SKU panel (или из файла) и расчёт дневной ёмкости |
@@ -47,9 +47,13 @@ python -m price_panel panel --export data/panel.csv
 ```
 
 `--marketplace` (по умолчанию `ozon`) выбирает, с чьими panel, прогонами и
-историей работать. Сбор WB (`parse --marketplace wb`) разрешён только при
-`marketplaces.wb.enabled: true` в `config.yaml`, иначе — код 1. Discovery для
-WB пока нет: SKU — аргументами или `--file`.
+историей работать. Discovery и сбор WB (`discover` / `parse --marketplace wb`)
+разрешены только при `marketplaces.wb.enabled: true` в `config.yaml`, иначе —
+код 1. Категории WB — `marketplaces.wb.categories`.
+
+```bash
+python -m price_panel discover --marketplace wb --category smartphones
+```
 
 ```bash
 python -m price_panel parse --marketplace wb 1343721205 1468131190

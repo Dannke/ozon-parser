@@ -11,9 +11,12 @@
   3. повторяет этот запрос из той же вкладки батчами по batch_size товаров,
      подставив свой регион (dest) и свой список SKU, с паузой между батчами.
 
-Отказ WB (403 / 429 / 498) - это antibot у всех SKU батча: капчу и проверки
-адаптер не решает, предохранитель ядра останавливает сбор. Подробности
-разведки - docs/verification-log.md (11.10.2026).
+498 на батч - скорее плановая смена токена (разведка 11.10.2026, 20:27):
+адаптер открывает карточку, сайт сам запрашивает её данные и своим JS
+получает новый токен, после чего батч повторяется - не больше
+TOKEN_REFRESHES раз. Отказ, который так не снимается, и 403 / 429 - antibot у
+всех SKU батча: капчу и проверки адаптер не решает, предохранитель ядра
+останавливает сбор. Подробности - docs/verification-log.md.
 """
 
 from __future__ import annotations
@@ -41,6 +44,10 @@ HOME_URL = "https://www.wildberries.ru/"
 CARD_URL = "https://www.wildberries.ru/catalog/{sku}/detail.aspx"
 DETAIL_PATH = "/__internal/u-card/cards/v4/detail"
 BLOCK_STATUSES = (403, 429, 498)
+# 498 на запрос сайта - смена токена: JS сайта получает новый и повторяет запрос.
+TOKEN_REFRESH = 498
+# Сколько раз подряд дать сайту обновить токен, прежде чем считать 498 отказом.
+TOKEN_REFRESHES = 2
 TOKEN_COOKIE = "x_wbaas_token"
 TOKEN_WAIT_SECONDS = 30
 SITE_REQUEST_WAIT_SECONDS = 15
@@ -126,7 +133,28 @@ def outcomes(body: dict, skus: Sequence[str], seconds: float, attempts: int = 1)
     return result
 
 
-def open_site(page: Page, context, skus: Sequence[str], pause: Callable) -> SiteRequest:
+def pass_browser_check(page: Page) -> None:
+    """Открывает главную WB и ждёт токен её проверки браузера (проходит JS сайта).
+
+    :raises SiteRefused: токена нет за TOKEN_WAIT_SECONDS.
+    """
+    log.info("Открываю %s (проверка браузера WB)", HOME_URL)
+    page.goto(HOME_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
+    deadline = time.monotonic() + TOKEN_WAIT_SECONDS
+    while TOKEN_COOKIE not in {c.get("name") for c in page.context.cookies()}:
+        if time.monotonic() > deadline:
+            raise SiteRefused("проверка браузера WB не пройдена за {} с".format(TOKEN_WAIT_SECONDS))
+        page.wait_for_timeout(1000)
+
+
+def wait_site_request(page: Page, seen: list) -> None:
+    """Ждёт, пока сайт сам сделает нужный запрос (seen пополняет обработчик page.on)."""
+    deadline = time.monotonic() + SITE_REQUEST_WAIT_SECONDS
+    while not seen and time.monotonic() < deadline:
+        page.wait_for_timeout(500)
+
+
+def open_site(page: Page, skus: Sequence[str], pause: Callable) -> SiteRequest:
     """Проходит проверку браузера и ловит запрос карточки самого сайта.
 
     :param pause: пауза перед открытием карточки - за прогон WB открываются
@@ -136,22 +164,14 @@ def open_site(page: Page, context, skus: Sequence[str], pause: Callable) -> Site
     """
     seen: list = []
     page.on("request", lambda request: seen.append(request) if DETAIL_PATH in request.url else None)
-    log.info("Открываю %s (проверка браузера WB)", HOME_URL)
-    page.goto(HOME_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-    deadline = time.monotonic() + TOKEN_WAIT_SECONDS
-    while TOKEN_COOKIE not in {c.get("name") for c in context.cookies()}:
-        if time.monotonic() > deadline:
-            raise SiteRefused("проверка браузера WB не пройдена за {} с".format(TOKEN_WAIT_SECONDS))
-        page.wait_for_timeout(1000)
+    pass_browser_check(page)
     for sku in skus[:3]:
         pause()
         log.info("Открываю карточку %s, чтобы взять запрос сайта", sku)
         page.goto(
             CARD_URL.format(sku=sku), wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
         )
-        deadline = time.monotonic() + SITE_REQUEST_WAIT_SECONDS
-        while not seen and time.monotonic() < deadline:
-            page.wait_for_timeout(500)
+        wait_site_request(page, seen)
         if seen:
             request = seen[0]
             return SiteRequest(url=request.url, headers=own_headers(request.all_headers()))
@@ -174,7 +194,7 @@ class WbAdapter:
             try:
                 page = context.new_page()
                 try:
-                    site = open_site(page, context, skus, lambda: self.sleep(self.delay))
+                    site = open_site(page, skus, lambda: self.sleep(self.delay))
                 except (SiteRefused, PlaywrightError) as exc:
                     log.error("WB: %s", exc)
                     # Как отказ сайта: предохранитель остановит сбор, повтор - позже.
@@ -186,21 +206,62 @@ class WbAdapter:
                     result = page.evaluate(FETCH_JS, [url, site.headers])
                     return result["status"], result["body"]
 
-                yield from self.batches(skus, site, fetch)
+                cards_ok: list = []
+                page.on(
+                    "response",
+                    lambda r: (
+                        cards_ok.append(r) if DETAIL_PATH in r.url and r.status == 200 else None
+                    ),
+                )
+
+                def refresh() -> bool:
+                    """Открывает карточку: сайт сам запросит её и при 498 обновит токен."""
+                    cards_ok.clear()
+                    self.sleep(self.delay)
+                    log.info("WB: 498 на батч - открываю карточку, чтобы сайт обновил токен")
+                    try:
+                        page.goto(
+                            CARD_URL.format(sku=skus[0]),
+                            wait_until="domcontentloaded",
+                            timeout=config.PAGE_TIMEOUT,
+                        )
+                        wait_site_request(page, cards_ok)
+                    except PlaywrightError as exc:
+                        log.warning("WB: карточка не открылась: %s", str(exc).splitlines()[0])
+                        return False
+                    return bool(cards_ok)
+
+                yield from self.batches(skus, site, fetch, refresh)
             finally:
                 browser_utils.close_quietly(context, browser)
         return None
 
-    def batches(self, skus: Sequence[str], site: SiteRequest, fetch: Callable):
-        """Итоги SKU по батчам: fetch(url) -> (HTTP-статус, тело)."""
+    def batches(
+        self,
+        skus: Sequence[str],
+        site: SiteRequest,
+        fetch: Callable,
+        refresh: Callable[[], bool] = lambda: False,
+    ):
+        """Итоги SKU по батчам: fetch(url) -> (HTTP-статус, тело).
+
+        :param refresh: даёт сайту обновить токен после 498; True - сайт снова отвечает.
+        """
         for start in range(0, len(skus), self.batch_size):
             chunk = list(skus[start : start + self.batch_size])
             if start:
                 self.sleep(self.delay * (1 + random.random() * 0.3))
             started = time.monotonic()
-            status, body, attempts = self._fetch_with_retries(
-                fetch, batch_url(site.url, self.dest, chunk)
-            )
+            url = batch_url(site.url, self.dest, chunk)
+            status, body, attempts = self._fetch_with_retries(fetch, url)
+            refreshes = 0
+            while status == TOKEN_REFRESH and refreshes < TOKEN_REFRESHES and refresh():
+                refreshes += 1
+                log.info(
+                    "WB: сайт обновил токен, повторяю батч (%s из %s)", refreshes, TOKEN_REFRESHES
+                )
+                status, body, more = self._fetch_with_retries(fetch, url)
+                attempts += more
             seconds = (time.monotonic() - started) / len(chunk)
             if status in BLOCK_STATUSES:
                 log.error("WB ответил HTTP %s на батч из %s SKU", status, len(chunk))

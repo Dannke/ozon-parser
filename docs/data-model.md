@@ -39,7 +39,7 @@ ozon-market-analytics не различает маркетплейсы, стро
 | Таблица          | Что хранит                                                              |
 | ---------------- | ----------------------------------------------------------------------- |
 | `marketplaces`   | Справочник маркетплейсов: `code` (`ozon`, `wb`), `title` |
-| `sku_panel`      | Panel: `sku` (уникален внутри маркетплейса), `category`, `source`, `source_url`, `position`, `page`, `sampling_group` (`top` / `tail_random`), `is_active`, `first_seen_at` / `last_seen_at` (когда discovery видел товар в выдаче), `created_at`, `updated_at`, `deactivated_at` |
+| `sku_panel`      | Panel: `sku` (уникален внутри маркетплейса), `category` (у WB — те же имена, что у Ozon), `source` (`ozon_listing` / `data_ozon` / `wb_catalog`), `source_url`, `position`, `page`, `sampling_group` (`top` / `tail_random`), `is_active`, `first_seen_at` / `last_seen_at` (когда discovery видел товар в выдаче), `created_at`, `updated_at`, `deactivated_at` |
 | `discovery_runs` | Запуски discovery: категория, источник, seed, запросов, найдено, отобрано, статус и причина неудачи |
 | `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay` (у WB — пауза между батчами), `region` (регион сбора: у WB — `dest` из `config.yaml`; у Ozon пусто — регион он определяет по IP, см. issue #4) |
 | `products`       | Последние атрибуты карточки: название, картинка, цвет, материал, комплектация, фото/видео, rich-контент |

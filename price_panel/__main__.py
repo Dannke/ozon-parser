@@ -68,7 +68,7 @@ def print_panel(wh: Warehouse) -> None:
 
 def cmd_discover(args, settings: Settings) -> int:
     print("Discovery started")
-    with _warehouse() as wh:
+    with _warehouse(args.marketplace) as wh:
         results = discovery.run_discovery(wh, settings, args.category, rebuild=args.rebuild)
         for result in results:
             category = result.category
@@ -81,7 +81,11 @@ def cmd_discover(args, settings: Settings) -> int:
                 print("  {:<11} {}".format(result.status.upper() + ":", result.note))
                 continue
             if result.status == "blocked":
-                print("  STOPPED:    Ozon ограничил запросы, найденное сохранено")
+                print(
+                    "  STOPPED:    {} ограничил запросы, найденное сохранено".format(
+                        discovery.site_title(wh)
+                    )
+                )
             depth = (
                 " (выдача кончается на странице {})".format(result.listing_depth)
                 if result.listing_depth
@@ -284,7 +288,7 @@ def add_marketplace(command: argparse.ArgumentParser) -> None:
         "--marketplace",
         choices=[OZON, WB],
         default=OZON,
-        help="маркетплейс (по умолчанию ozon); сбор wb - при marketplaces.wb.enabled",
+        help="маркетплейс (по умолчанию ozon); wb - при marketplaces.wb.enabled",
     )
 
 
@@ -308,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="пересобрать panel категории заново (старая выключается)",
     )
+    add_marketplace(discover)
     discover.set_defaults(func=cmd_discover)
 
     panel = commands.add_parser("panel", help="состав panel")

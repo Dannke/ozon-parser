@@ -168,14 +168,54 @@ benchmark:
 
 marketplaces:
   wb:
-    # Сбор Wildberries (python -m price_panel parse --marketplace wb). Выключен,
-    # пока ozon-market-analytics не различает маркетплейсы: иначе строки WB в
-    # боевой базе смешались бы с Ozon.
+    # Сбор Wildberries (python -m price_panel discover / parse --marketplace wb).
+    # Выключен, пока ozon-market-analytics не различает маркетплейсы: иначе
+    # строки WB в боевой базе смешались бы с Ozon.
     enabled: false
     # Регион доставки (dest) - Новосибирск, ПВЗ «Чаплыгина 16»: от него зависят
     # наличие и сроки. Найден разведкой 11.10.2026 (docs/verification-log.md).
     dest: "-365341"
     # Карточек в одном запросе (1..100: сайт отдаёт до 100 за раз) и пауза
-    # между запросами, секунды (не меньше 3: человеческий темп).
+    # между обращениями - запросами карточек и страницами выдачи, секунды
+    # (не меньше 3).
     batch_size: 100
-    request_delay: 5
+    request_delay: 8
+    # Хвост panel: у WB 100 товаров на странице, а глубже первой выдача
+    # грузится только прокруткой - страница за страницей, поэтому глубина
+    # хвоста - 40 страниц (4000 позиций). Темп и top_ratio - общие, из discovery.
+    tail_max_page: 40
+    tail_items_per_page: 5
+
+    # Те же категории, что у Ozon. Адрес - страница каталога (или поиска) WB,
+    # фильтр по предмету (xsubject) - прямо в адресе: запрос выдачи берётся у
+    # самого сайта, чужой запрос WB отвергает. Отличия от Ozon (разведка
+    # 11.10.2026, docs/discovery.md):
+    #   phone_cases - общей категории чехлов у WB нет (только по моделям),
+    #     поэтому поиск «чехол для телефона» с предметом 390 «Чехлы»;
+    #   coffee_machines - «Приготовление напитков», предметы 631 «Кофеварки»
+    #     и 1188 «Кофемашины»;
+    #   string_accessories - «Профессиональные музыкальные инструменты»,
+    #     предметы 3333 «Струны» и 6812 «Аксессуары для музыкальных
+    #     инструментов» (там и не только струнные).
+    categories:
+      - name: phone_cases
+        title: "Чехлы для телефонов"
+        url: "https://www.wildberries.ru/catalog/0/search.aspx?search=%D1%87%D0%B5%D1%85%D0%BE%D0%BB%20%D0%B4%D0%BB%D1%8F%20%D1%82%D0%B5%D0%BB%D0%B5%D1%84%D0%BE%D0%BD%D0%B0&xsubject=390"
+        panel_size: 300
+
+      - name: smartphones
+        title: "Смартфоны"
+        url: https://www.wildberries.ru/catalog/elektronika/smartfony-i-telefony/vse-smartfony
+        panel_size: 300
+
+      - name: coffee_machines
+        title: "Кофеварки и кофемашины"
+        url: "https://www.wildberries.ru/catalog/elektronika/tehnika-dlya-kuhni/prigotovlenie-napitkov?xsubject=631%3B1188"
+        panel_size: 300
+        # Всего ~2740 товаров (~28 страниц): по 5 со страницы хвост не набрать.
+        tail_items_per_page: 8
+
+      - name: string_accessories
+        title: "Струны и аксессуары для музыкальных инструментов"
+        url: "https://www.wildberries.ru/catalog/dom-i-dacha/professionalnye-muzykalnye-instrumenty?xsubject=3333%3B6812"
+        panel_size: 300
