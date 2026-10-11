@@ -12,7 +12,6 @@ import json
 from typing import Any, cast
 
 import pytest
-from playwright.sync_api import Error as PlaywrightError
 
 from price_panel.app import discovery
 from price_panel.app.settings import SettingsError, parse_settings
@@ -62,12 +61,7 @@ def test_parse_search_takes_ids_in_listing_order():
     assert catalog.parse_search({"products": None}, 1) == []
 
 
-def test_page_addresses():
-    """Адрес страницы категории получает page; номер страницы читается из запроса сайта."""
-    assert catalog.category_page_url(PAGE_URL, 1) == PAGE_URL
-    assert catalog.category_page_url(PAGE_URL, 7) == PAGE_URL + "&page=7"
-    plain = "https://www.wildberries.ru/catalog/elektronika/smartfony-i-telefony/vse-smartfony"
-    assert catalog.category_page_url(plain, 3) == plain + "?page=3"
+def test_listing_page_numbers():
     assert catalog.listing_page(SITE_URL) == 1
     assert catalog.listing_page(SITE_URL + "&page=12") == 12
     assert catalog.is_listing_request(SITE_URL)
@@ -79,7 +73,7 @@ def test_page_addresses():
 def test_wb_categories_from_settings():
     """Категории WB - со своим источником, адресом WB и хвостом по умолчанию."""
     assert CATEGORY.source == "wb_catalog"
-    assert (CATEGORY.tail_max_page, CATEGORY.tail_items_per_page) == (99, 5)
+    assert (CATEGORY.tail_max_page, CATEGORY.tail_items_per_page) == (40, 5)
     assert CATEGORY.top_size == 120
     data = json.loads(json.dumps(SETTINGS_DATA))
     data["marketplaces"]["wb"]["categories"][0]["url"] = "https://www.ozon.ru/category/x-1/"
@@ -111,39 +105,51 @@ class FakeContext:
         return [{"name": "x_wbaas_token"}] if self.token else []
 
 
-class FakePage:
-    """Вкладка WB: на открытие страницы категории «сайт» запрашивает выдачу.
+class FakeKeyboard:
+    def __init__(self, page: FakePage):
+        self.page = page
 
-    answers - по одному на открытие страницы категории: (статус, тело) ответа
-    сайта, None - сайт выдачу не запросил, исключение - goto упал.
-    ignore_page - сайт не понимает page в адресе и всегда грузит первую страницу.
+    def press(self, key: str) -> None:
+        assert key == "End"
+        self.page.presses += 1
+        self.page.answer()
+
+
+class FakePage:
+    """Вкладка WB с бесконечной выдачей: страницы сайт грузит по порядку.
+
+    answers - что сайт отдаёт: первое - на открытие страницы категории,
+    дальше - по одному на прокрутку. Ответ - (статус, тело) одной страницы,
+    список таких - сайт загрузил сразу несколько, None - ничего не загрузил.
     """
 
-    def __init__(self, answers=(), token=True, ignore_page=False):
+    def __init__(self, answers=(), token=True):
         self.context = FakeContext(token)
+        self.keyboard = FakeKeyboard(self)
         self.answers = list(answers)
-        self.ignore_page = ignore_page
         self.handlers: list = []
         self.opened: list = []
+        self.presses = 0
+        self.next_page = 1
 
     def on(self, event, handler):
         assert event == "response"
         self.handlers.append(handler)
 
+    def answer(self) -> None:
+        answer = self.answers.pop(0) if self.answers else None
+        for status, body in [answer] if isinstance(answer, tuple) else answer or []:
+            number = self.next_page
+            self.next_page += 1
+            site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
+            for handler in self.handlers:
+                handler(FakeResponse(site, status, body))
+                handler(FakeResponse(SITE_URL.replace("catalog", "filters"), 200, "{}"))
+
     def goto(self, url, **kwargs):
         self.opened.append(url)
-        if not url.startswith(PAGE_URL):
-            return  # главная
-        answer = self.answers.pop(0)
-        if isinstance(answer, Exception):
-            raise answer
-        if answer is None:
-            return
-        number = 1 if self.ignore_page or "page=" not in url else int(url.split("page=")[1])
-        site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
-        for handler in self.handlers:
-            handler(FakeResponse(site, *answer))
-            handler(FakeResponse(SITE_URL.replace("catalog", "filters"), 200, "{}"))
+        if url == PAGE_URL:
+            self.answer()
 
     def wait_for_timeout(self, ms):
         pass
@@ -164,59 +170,77 @@ def source_for(page: FakePage) -> catalog.WbCatalogSource:
     return source
 
 
-def test_pages_are_opened_like_a_visitor_and_read_from_the_sites_answer():
-    """Своих запросов выдачи нет: страница открывается по адресу, ответ - сайта."""
-    page = FakePage(answers=[(200, listing(1, 2)), (200, listing(3, 4))])
+def test_pages_come_from_the_site_by_scrolling():
+    """Своих запросов нет: первую страницу сайт грузит сам, следующие - на прокрутку."""
+    page = FakePage(answers=[(200, listing(1)), (200, listing(2)), (200, listing(3))])
     source = source_for(page)
 
-    assert [c.sku for c in source.fetch(CATEGORY, 1) or []] == ["1", "2"]
-    assert [c.sku for c in source.fetch(CATEGORY, 5) or []] == ["3", "4"]
-    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL, PAGE_URL + "&page=5"]
-    assert source.requests == 2 and not source.blocked
+    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL]
+    assert [c.sku for c in source.fetch(CATEGORY, 1) or []] == ["1"]
+    assert page.presses == 0
+    assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
+    assert page.presses == 2
+    # Пройденная страница - из памяти, без новой прокрутки.
+    assert [c.sku for c in source.fetch(CATEGORY, 2) or []] == ["2"]
+    assert page.presses == 2 and source.requests == 3
+    assert source.fetch(CATEGORY, 3)[0].position == 201  # type: ignore[index]
+
+
+def test_several_pages_from_one_scroll():
+    page = FakePage(answers=[(200, listing(1)), [(200, listing(2)), (200, listing(3))]])
+    source = source_for(page)
+    assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
+    assert page.presses == 1
 
 
 def test_empty_page_is_the_end_of_listing():
-    source = source_for(FakePage(answers=[(200, listing())]))
-    assert source.fetch(CATEGORY, 100) == []
+    page = FakePage(answers=[(200, listing(1)), (200, listing())])
+    source = source_for(page)
+    assert source.fetch(CATEGORY, 2) == []
+    assert source.fetch(CATEGORY, 9) == [] and page.presses == 1
     assert not source.blocked
 
 
 @pytest.mark.parametrize("status", [403, 429, 498])
-def test_refusal_stops_the_source_without_retries(status):
-    page = FakePage(answers=[(status, "")])
+def test_refusal_stops_the_source(status):
+    page = FakePage(answers=[(200, listing(1)), (status, "")])
     source = source_for(page)
     assert source.fetch(CATEGORY, 2) is None
-    assert source.blocked and len(page.opened) == 2
-    assert source.fetch(CATEGORY, 3) is None and len(page.opened) == 2
+    assert source.blocked and page.presses == 1
+    assert source.fetch(CATEGORY, 3) is None and page.presses == 1
+    # Уже загруженное остаётся.
+    assert source.fetch(CATEGORY, 1)
 
 
-def test_failed_browser_check_blocks_before_any_page():
+def test_refused_first_page_or_browser_check_blocks():
+    source = source_for(FakePage(answers=[(498, "")]))
+    assert source.blocked and source.fetch(CATEGORY, 1) is None
     page = FakePage(token=False)
     source = source_for(page)
-    assert source.blocked and source.fetch(CATEGORY, 1) is None
-    assert page.opened == ["https://www.wildberries.ru/"]
+    assert source.blocked and page.opened == ["https://www.wildberries.ru/"]
 
 
-def test_other_page_is_never_taken_for_the_requested_one():
-    """WB проигнорировал page и показал первую: страница пропущена, а не подменена."""
-    page = FakePage(answers=[(200, listing(1))] * 3, ignore_page=True)
+def test_page_without_listing_request_is_a_failure():
+    with pytest.raises(catalog.SiteRefused, match="выдачу"):
+        source_for(FakePage(answers=[None]))
+
+
+def test_stalled_scroll_ends_the_listing():
+    """Прокрутка не грузит ничего - после повторов глубже не идём."""
+    page = FakePage(answers=[(200, listing(1)), (200, listing(2))])
     source = source_for(page)
-    assert source.fetch(CATEGORY, 4) is None
-    assert not source.blocked and len(page.opened) == 1 + 3
+    assert source.fetch(CATEGORY, 5) == []
+    assert page.presses == 1 + 3  # страница 2, затем 3 пустые попытки
+    assert source.fetch(CATEGORY, 2) and source.fetch(CATEGORY, 7) == []
+    assert page.presses == 4 and not source.blocked
 
 
-def test_ordinary_errors_are_retried_then_skipped(no_waits):
-    page = FakePage(answers=[(502, ""), PlaywrightError("net::ERR_RESET"), None, (200, listing(5))])
-    source = catalog.WbCatalogSource(lambda: cast(Any, page), delay=0.0)
-    source.open(CATEGORY)
-    config.MAX_RETRIES = 3
-    assert [c.sku for c in source.fetch(CATEGORY, 2) or []] == ["5"]
-    assert not source.blocked and len(no_waits) == 3
-
-    broken = FakePage(answers=[(500, "")] * 4)
-    source = source_for(broken)
-    assert source.fetch(CATEGORY, 2) is None
-    assert not source.blocked and len(broken.opened) == 1 + 4
+def test_unparsed_answer_is_not_a_page(no_waits):
+    page = FakePage(answers=[(200, listing(1)), (502, ""), (200, listing(3))])
+    source = source_for(page)
+    # Страница 2 не разобралась, сайт пошёл дальше - её нет, но 3 есть.
+    assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
+    assert 2 not in source.pages
 
 
 # --------------------------------------------------------------- обход --

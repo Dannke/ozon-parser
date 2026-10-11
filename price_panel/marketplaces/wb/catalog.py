@@ -4,20 +4,24 @@
 
     /__internal/u-search/exactmatch/ru/common/v18/search?query=<запрос категории>&page=N
 
-по 100 товаров на страницу. Наши собственные запросы выдачи WB терпит
-недолго: с чужим query - сразу 498, с тем же query и другой page - около
-шести за сессию, дальше 498, и повторный показ страницы этого не меняет
-(discovery 11.10.2026, 18:39 и 19:25). Поэтому источник своих запросов
-выдачи не делает вовсе - он листает сайт, как человек:
+по 100 товаров на страницу. Свои запросы выдачи WB терпит недолго: с чужим
+query - сразу 498, с тем же query и другой page - около шести за сессию,
+дальше 498; page в адресе самой страницы сайт не понимает и грузит первую
+(discovery 11.10.2026, 18:39, 19:25, 20:14). Следующие страницы сайт
+запрашивает сам, когда выдачу прокручивают до конца. Поэтому источник
+листает выдачу, как человек:
 
   1. проходит проверку браузера на главной (как адаптер карточек);
   2. открывает страницу категории из config.yaml (фильтры, xsubject, - в её
-     адресе) с page=N и берёт ответ на запрос выдачи, который сделал сам
-     сайт для этой страницы; между страницами - пауза request_delay.
+     адресе): первую страницу выдачи сайт запрашивает сам;
+  3. чтобы получить страницу N, прокручивает выдачу (клавиша End) с паузой
+     request_delay, пока сайт не загрузит её; пройденные страницы
+     запоминает - хвост выбирается из них.
 
-Выдача кончается раньше 100-й страницы (сотая - уже пустая): пустая
-страница - конец. Отказ WB (403 / 429 / 498) - стоп без повторов: капчу и
-проверки источник не решает, найденное сохраняется.
+Пустая страница - конец выдачи; если прокрутка несколько раз подряд не
+загрузила ничего, глубже источник тоже не идёт. Отказ WB (403 / 429 / 498)
+на запрос сайта - стоп без повторов: капчу и проверки источник не решает,
+найденное сохраняется.
 """
 
 from __future__ import annotations
@@ -73,13 +77,6 @@ def listing_page(url: str) -> int:
         return 0
 
 
-def category_page_url(url: str, page: int) -> str:
-    """Адрес страницы категории с нужной страницей выдачи; первая - как в config.yaml."""
-    if page == 1:
-        return url
-    return "{}{}page={}".format(url, "&" if "?" in url else "?", page)
-
-
 def parse_search(body: dict, page: int) -> list:
     """Кандидаты из ответа выдачи: SKU - id товара, позиция - место в выдаче."""
     products = [p for p in body.get("products") or [] if isinstance(p, dict) and p.get("id")]
@@ -98,6 +95,10 @@ def parse_search(body: dict, page: int) -> list:
 class WbCatalogSource:
     """Выдача категории WB для общего обхода discovery (discover_listing).
 
+    Страницы приходят только по порядку (прокруткой), поэтому fetch(N)
+    догружает всё до N и запоминает: обход просит страницы хвоста по
+    возрастанию, и каждая загружается один раз.
+
     :param new_page: вкладка в новой чистой сессии браузера.
     """
 
@@ -107,14 +108,18 @@ class WbCatalogSource:
         self.new_page = new_page
         self.delay = delay
         self.jitter = jitter
+        # Запросов выдачи, которые сделал сайт (наших запросов нет).
         self.requests = 0
         self.blocked = False
         self.page: Page | None = None
+        self.pages: dict = {}
+        # Первая страница, на которой выдача кончилась (или дальше не прокрутить).
+        self.end: int | None = None
         self._responses: list = []
         self._last_done = 0.0
 
     def _pause(self) -> None:
-        """Пауза от конца предыдущей страницы, со случайным разбросом."""
+        """Пауза от предыдущего действия на странице, со случайным разбросом."""
         target = self.delay * random.uniform(1 - self.jitter, 1 + self.jitter)
         wait = target - (time.monotonic() - self._last_done)
         if wait > 0:
@@ -128,8 +133,43 @@ class WbCatalogSource:
             reason,
         )
 
+    def _wait_responses(self, page: Page) -> None:
+        """Ждёт ответ на запрос выдачи, который сделает сайт."""
+        deadline = time.monotonic() + RESPONSE_WAIT_SECONDS
+        while not self._responses and time.monotonic() < deadline:
+            page.wait_for_timeout(500)
+
+    def _collect(self, category: Category) -> None:
+        """Раскладывает пришедшие сайту ответы выдачи по страницам."""
+        responses, self._responses = self._responses, []
+        for response in responses:
+            self.requests += 1
+            number = listing_page(response.url)
+            if response.status in BLOCK_STATUSES:
+                self._refused(category, "HTTP {}, страница {}".format(response.status, number))
+                return
+            try:
+                body = json.loads(response.text()) if response.status == 200 else None
+            except (json.JSONDecodeError, PlaywrightError):
+                body = None
+            if not isinstance(body, dict):
+                log.warning(
+                    "%s: страница %s: ответ сайта не разобран (HTTP %s)",
+                    category.name,
+                    number,
+                    response.status,
+                )
+                continue
+            self.pages[number] = parse_search(body, number)
+            log.info("%s: сайт загрузил страницу выдачи %s", category.name, number)
+            if not self.pages[number]:
+                self.end = number if self.end is None else min(self.end, number)
+
     def open(self, category: Category) -> None:
-        """Новая сессия: проверка браузера WB и слежение за ответами выдачи сайта."""
+        """Новая сессия: проверка браузера WB и страница категории (первая страница выдачи).
+
+        :raises SiteRefused: страница не запросила выдачу (не та страница, сменилась вёрстка).
+        """
         page = self.page = self.new_page()
         page.on(
             "response",
@@ -141,73 +181,52 @@ class WbCatalogSource:
             pass_browser_check(page)
         except SiteRefused as exc:
             self._refused(category, str(exc))
-
-    def _site_response(self, page: Page, number: int):
-        """Ответ сайта на запрос выдачи страницы number, если он был."""
-        deadline = time.monotonic() + RESPONSE_WAIT_SECONDS
-        while True:
-            for response in self._responses:
-                if listing_page(response.url) == number:
-                    return response
-            if time.monotonic() >= deadline:
-                return None
-            page.wait_for_timeout(500)
-
-    def _view(self, page: Page, category: Category, number: int) -> tuple:
-        """Открывает страницу выдачи: (HTTP-статус ответа сайта, тело) или (0, причина)."""
-        self._responses.clear()
+            return
         self._pause()
-        log.info("%s: открываю страницу выдачи %s", category.name, number)
+        log.info("%s: открываю %s", category.name, category.url)
         try:
-            page.goto(
-                category_page_url(category.url, number),
-                wait_until="domcontentloaded",
-                timeout=config.PAGE_TIMEOUT,
-            )
-            response = self._site_response(page, number)
-            if response is None:
-                # Не та страница (WB проигнорировал page) за нужную не выдаётся.
-                return 0, "сайт не запросил выдачу страницы {}".format(number)
-            return response.status, response.text() if response.status == 200 else ""
-        except PlaywrightError as exc:
-            return 0, str(exc).splitlines()[0]
+            page.goto(category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
+            self._wait_responses(page)
+        finally:
+            self._last_done = time.monotonic()
+        self._collect(category)
+        if not self.blocked and 1 not in self.pages:
+            raise SiteRefused("{}: страница не запросила выдачу".format(category.name))
+
+    def _scroll(self, page: Page) -> None:
+        """Прокрутка выдачи до конца: следующую страницу сайт запросит сам."""
+        self._pause()
+        try:
+            page.keyboard.press("End")
+            self._wait_responses(page)
         finally:
             self._last_done = time.monotonic()
 
     def fetch(self, category: Category, page_number: int) -> list | None:
         """Товары одной страницы выдачи; [] - выдача кончилась; None - не получили."""
-        if self.blocked or self.page is None:
+        if self.page is None:
             return None
-        errors = 0
-        while True:
-            self.requests += 1
-            status, body = self._view(self.page, category, page_number)
-            if status in BLOCK_STATUSES:
-                self._refused(category, "HTTP {}, страница {}".format(status, page_number))
+        stalls = 0
+        while page_number not in self.pages:
+            if self.blocked:
                 return None
-            try:
-                data = json.loads(body) if status == 200 else None
-            except json.JSONDecodeError:
-                data = None
-            if isinstance(data, dict):
-                return parse_search(data, page_number)
-            errors += 1
-            reason = "HTTP {}".format(status) if status else body
-            if errors > config.MAX_RETRIES:
+            if self.end is not None and page_number >= self.end:
+                return []
+            if stalls > config.MAX_RETRIES:
                 log.warning(
-                    "%s: страница %s пропущена после %s попыток (%s)",
+                    "%s: прокрутка не загрузила страницу %s после %s попыток - глубже "
+                    "выдачу не беру",
                     category.name,
                     page_number,
-                    errors,
-                    reason,
+                    stalls,
                 )
-                return None
-            log.warning(
-                "%s: страница %s не получена (%s), повтор %s из %s",
-                category.name,
-                page_number,
-                reason,
-                errors,
-                config.MAX_RETRIES,
-            )
-            time.sleep(self.delay * errors)
+                self.end = max(self.pages, default=0) + 1
+                return []
+            loaded = len(self.pages)
+            try:
+                self._scroll(self.page)
+            except PlaywrightError as exc:
+                log.warning("%s: прокрутка не удалась: %s", category.name, str(exc).splitlines()[0])
+            self._collect(category)
+            stalls = stalls + 1 if len(self.pages) == loaded else 0
+        return self.pages[page_number]

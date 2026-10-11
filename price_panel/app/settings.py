@@ -340,11 +340,11 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
         raise SettingsError("marketplaces.wb.dest={!r}: ожидается целое число".format(wb_dest))
     if wb.get("enabled") and not wb_dest:
         raise SettingsError("marketplaces.wb: включён, но не задан dest (регион доставки)")
-    # У WB 100 товаров на странице, и выдача кончается раньше 100-й страницы
-    # (разведка 11.10.2026) - свои значения хвоста по умолчанию.
+    # У WB 100 товаров на странице, а глубже первой выдача грузится только
+    # прокруткой (marketplaces/wb/catalog.py) - свои значения хвоста по умолчанию.
     wb_defaults = dict(
         defaults,
-        tail_max_page=_int(wb, "tail_max_page", 99, minimum=2, where="marketplaces.wb."),
+        tail_max_page=_int(wb, "tail_max_page", 40, minimum=2, where="marketplaces.wb."),
         tail_items_per_page=_int(wb, "tail_items_per_page", 5, minimum=1, where="marketplaces.wb."),
     )
     wb_categories = tuple(
