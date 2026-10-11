@@ -4,24 +4,24 @@
 
     /__internal/u-search/exactmatch/ru/common/v18/search?query=<запрос категории>&page=N
 
-по 100 товаров на страницу. Свои запросы выдачи WB терпит недолго: с чужим
-query - сразу 498, с тем же query и другой page - около шести за сессию,
-дальше 498; page в адресе самой страницы сайт не понимает и грузит первую
-(discovery 11.10.2026, 18:39, 19:25, 20:14). Следующие страницы сайт
-запрашивает сам, когда выдачу прокручивают до конца. Поэтому источник
-листает выдачу, как человек:
+по 100 товаров на страницу. page в адресе самой страницы сайт не понимает
+(грузит первую), следующие страницы он запрашивает сам, когда выдачу плавно
+прокручивают вниз (разведка 11.10.2026, 20:14-20:28). Поэтому источник своих
+запросов выдачи не делает - он листает выдачу, как человек:
 
   1. проходит проверку браузера на главной (как адаптер карточек);
   2. открывает страницу категории из config.yaml (фильтры, xsubject, - в её
      адресе): первую страницу выдачи сайт запрашивает сам;
-  3. чтобы получить страницу N, прокручивает выдачу (клавиша End) с паузой
-     request_delay, пока сайт не загрузит её; пройденные страницы
-     запоминает - хвост выбирается из них.
+  3. чтобы получить страницу N, плавно крутит колесо мыши, пока сайт не
+     загрузит её, с паузой request_delay между страницами; пройденные
+     страницы запоминает - хвост выбирается из них.
 
+498 на запрос выдачи - плановая смена токена: JS самого сайта получает новый
+(create-token) и через секунду повторяет запрос, источник просто ждёт. Если
+сайт не восстановился за TOKEN_REFRESHES раз или ответил 403 / 429 - стоп
+без повторов: капчу и проверки источник не решает, найденное сохраняется.
 Пустая страница - конец выдачи; если прокрутка несколько раз подряд не
-загрузила ничего, глубже источник тоже не идёт. Отказ WB (403 / 429 / 498)
-на запрос сайта - стоп без повторов: капчу и проверки источник не решает,
-найденное сохраняется.
+загрузила ничего, глубже источник тоже не идёт.
 """
 
 from __future__ import annotations
@@ -52,6 +52,14 @@ log = get_logger("discovery")
 SEARCH_PATH = "/__internal/u-search/"
 PAGE_SIZE = 100
 RESPONSE_WAIT_SECONDS = SITE_REQUEST_WAIT_SECONDS
+# Плавная прокрутка: шаг колеса и пауза - как у человека; одна попытка догрузки
+# крутит не дольше SCROLL_SECONDS (страница выдачи - ~25 шагов, 20:27).
+SCROLL_STEP_PX = 400
+SCROLL_PAUSE_MS = 400
+SCROLL_SECONDS = 30
+TOKEN_REFRESH = 498
+# Сколько раз подряд на одну страницу сайт может получить 498 и обновить токен.
+TOKEN_REFRESHES = 2
 
 
 class Category(Protocol):
@@ -115,6 +123,7 @@ class WbCatalogSource:
         self.pages: dict = {}
         # Первая страница, на которой выдача кончилась (или дальше не прокрутить).
         self.end: int | None = None
+        self._refreshes: dict = {}
         self._responses: list = []
         self._last_done = 0.0
 
@@ -145,6 +154,17 @@ class WbCatalogSource:
         for response in responses:
             self.requests += 1
             number = listing_page(response.url)
+            if response.status == TOKEN_REFRESH and number not in self.pages:
+                # Сайт сам обновит токен и повторит запрос - ждём его ответа.
+                self._refreshes[number] = self._refreshes.get(number, 0) + 1
+                log.info("%s: страница %s: WB обновляет токен (498)", category.name, number)
+                if self._refreshes[number] > TOKEN_REFRESHES:
+                    self._refused(
+                        category,
+                        "498 {} раза подряд, страница {}".format(self._refreshes[number], number),
+                    )
+                    return
+                continue
             if response.status in BLOCK_STATUSES:
                 self._refused(category, "HTTP {}, страница {}".format(response.status, number))
                 return
@@ -186,18 +206,27 @@ class WbCatalogSource:
         log.info("%s: открываю %s", category.name, category.url)
         try:
             page.goto(category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-            self._wait_responses(page)
+            # После 498 сайт повторит запрос сам - ответ на повтор ждём так же.
+            for _ in range(TOKEN_REFRESHES + 1):
+                self._wait_responses(page)
+                self._collect(category)
+                if self.blocked or 1 in self.pages:
+                    break
         finally:
             self._last_done = time.monotonic()
-        self._collect(category)
         if not self.blocked and 1 not in self.pages:
             raise SiteRefused("{}: страница не запросила выдачу".format(category.name))
 
     def _scroll(self, page: Page) -> None:
-        """Прокрутка выдачи до конца: следующую страницу сайт запросит сам."""
+        """Плавно крутит выдачу вниз, пока сайт не запросит следующую страницу."""
         self._pause()
+        deadline = time.monotonic() + SCROLL_SECONDS
         try:
-            page.keyboard.press("End")
+            while True:
+                page.mouse.wheel(0, SCROLL_STEP_PX)
+                page.wait_for_timeout(SCROLL_PAUSE_MS)
+                if self._responses or time.monotonic() >= deadline:
+                    break
             self._wait_responses(page)
         finally:
             self._last_done = time.monotonic()

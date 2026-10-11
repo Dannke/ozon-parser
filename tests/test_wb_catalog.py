@@ -105,31 +105,32 @@ class FakeContext:
         return [{"name": "x_wbaas_token"}] if self.token else []
 
 
-class FakeKeyboard:
+class FakeMouse:
     def __init__(self, page: FakePage):
         self.page = page
 
-    def press(self, key: str) -> None:
-        assert key == "End"
-        self.page.presses += 1
+    def wheel(self, dx: int, dy: int) -> None:
+        assert dy > 0
+        self.page.wheels += 1
         self.page.answer()
 
 
 class FakePage:
-    """Вкладка WB с бесконечной выдачей: страницы сайт грузит по порядку.
+    """Вкладка WB с выдачей, которая догружается прокруткой: страницы - по порядку.
 
     answers - что сайт отдаёт: первое - на открытие страницы категории,
-    дальше - по одному на прокрутку. Ответ - (статус, тело) одной страницы,
-    список таких - сайт загрузил сразу несколько, None - ничего не загрузил.
+    дальше - по одному на шаг прокрутки. Ответ - (статус, тело) следующей
+    страницы или (статус, тело, номер), список таких - несколько ответов
+    сразу, None - сайт ничего не запросил.
     """
 
     def __init__(self, answers=(), token=True):
         self.context = FakeContext(token)
-        self.keyboard = FakeKeyboard(self)
+        self.mouse = FakeMouse(self)
         self.answers = list(answers)
         self.handlers: list = []
         self.opened: list = []
-        self.presses = 0
+        self.wheels = 0
         self.next_page = 1
 
     def on(self, event, handler):
@@ -138,9 +139,10 @@ class FakePage:
 
     def answer(self) -> None:
         answer = self.answers.pop(0) if self.answers else None
-        for status, body in [answer] if isinstance(answer, tuple) else answer or []:
-            number = self.next_page
-            self.next_page += 1
+        for item in [answer] if isinstance(answer, tuple) else answer or []:
+            status, body, number = (*item, self.next_page) if len(item) == 2 else item
+            if status == 200:
+                self.next_page = number + 1
             site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
             for handler in self.handlers:
                 handler(FakeResponse(site, status, body))
@@ -160,6 +162,7 @@ def no_waits(monkeypatch):
     sleeps: list = []
     monkeypatch.setattr(catalog.time, "sleep", sleeps.append)
     monkeypatch.setattr(catalog, "RESPONSE_WAIT_SECONDS", 0)
+    monkeypatch.setattr(catalog, "SCROLL_SECONDS", 0)
     monkeypatch.setattr(config, "MAX_RETRIES", 2)
     return sleeps
 
@@ -177,12 +180,12 @@ def test_pages_come_from_the_site_by_scrolling():
 
     assert page.opened == ["https://www.wildberries.ru/", PAGE_URL]
     assert [c.sku for c in source.fetch(CATEGORY, 1) or []] == ["1"]
-    assert page.presses == 0
+    assert page.wheels == 0
     assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
-    assert page.presses == 2
+    assert page.wheels == 2
     # Пройденная страница - из памяти, без новой прокрутки.
     assert [c.sku for c in source.fetch(CATEGORY, 2) or []] == ["2"]
-    assert page.presses == 2 and source.requests == 3
+    assert page.wheels == 2 and source.requests == 3
     assert source.fetch(CATEGORY, 3)[0].position == 201  # type: ignore[index]
 
 
@@ -190,30 +193,52 @@ def test_several_pages_from_one_scroll():
     page = FakePage(answers=[(200, listing(1)), [(200, listing(2)), (200, listing(3))]])
     source = source_for(page)
     assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
-    assert page.presses == 1
+    assert page.wheels == 1
 
 
 def test_empty_page_is_the_end_of_listing():
     page = FakePage(answers=[(200, listing(1)), (200, listing())])
     source = source_for(page)
     assert source.fetch(CATEGORY, 2) == []
-    assert source.fetch(CATEGORY, 9) == [] and page.presses == 1
+    assert source.fetch(CATEGORY, 9) == [] and page.wheels == 1
     assert not source.blocked
 
 
-@pytest.mark.parametrize("status", [403, 429, 498])
+def test_token_refresh_is_waited_for_not_a_refusal():
+    """498 - сайт сам обновляет токен и повторяет запрос; источник ждёт ответ."""
+    page = FakePage(
+        answers=[
+            [(498, "", 1), (200, listing(1), 1)],
+            [(498, "", 2), (200, listing(2), 2)],
+            [(498, "", 3)],
+            (200, listing(3), 3),
+        ]
+    )
+    source = source_for(page)
+    assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
+    assert not source.blocked and page.wheels == 3
+
+
+def test_token_refresh_that_never_recovers_stops_the_source():
+    page = FakePage(answers=[(200, listing(1)), (498, "", 2), (498, "", 2), (498, "", 2)])
+    source = source_for(page)
+    assert source.fetch(CATEGORY, 2) is None
+    assert source.blocked and page.wheels == 3
+
+
+@pytest.mark.parametrize("status", [403, 429])
 def test_refusal_stops_the_source(status):
     page = FakePage(answers=[(200, listing(1)), (status, "")])
     source = source_for(page)
     assert source.fetch(CATEGORY, 2) is None
-    assert source.blocked and page.presses == 1
-    assert source.fetch(CATEGORY, 3) is None and page.presses == 1
+    assert source.blocked and page.wheels == 1
+    assert source.fetch(CATEGORY, 3) is None and page.wheels == 1
     # Уже загруженное остаётся.
     assert source.fetch(CATEGORY, 1)
 
 
 def test_refused_first_page_or_browser_check_blocks():
-    source = source_for(FakePage(answers=[(498, "")]))
+    source = source_for(FakePage(answers=[(429, "")]))
     assert source.blocked and source.fetch(CATEGORY, 1) is None
     page = FakePage(token=False)
     source = source_for(page)
@@ -230,13 +255,13 @@ def test_stalled_scroll_ends_the_listing():
     page = FakePage(answers=[(200, listing(1)), (200, listing(2))])
     source = source_for(page)
     assert source.fetch(CATEGORY, 5) == []
-    assert page.presses == 1 + 3  # страница 2, затем 3 пустые попытки
+    assert page.wheels == 1 + 3  # страница 2, затем 3 пустые попытки
     assert source.fetch(CATEGORY, 2) and source.fetch(CATEGORY, 7) == []
-    assert page.presses == 4 and not source.blocked
+    assert page.wheels == 4 and not source.blocked
 
 
-def test_unparsed_answer_is_not_a_page(no_waits):
-    page = FakePage(answers=[(200, listing(1)), (502, ""), (200, listing(3))])
+def test_unparsed_answer_is_not_a_page():
+    page = FakePage(answers=[(200, listing(1)), (502, "", 2), (200, listing(3), 3)])
     source = source_for(page)
     # Страница 2 не разобралась, сайт пошёл дальше - её нет, но 3 есть.
     assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
