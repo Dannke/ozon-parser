@@ -15,6 +15,9 @@
       646-684-й странице. SKU берётся из ссылки на карточку
       (/product/<slug>-<sku>/), а не из вёрстки.
 
+  wb_catalog - выдача категории wildberries.ru, тем же запросом, что делает
+      сам сайт (marketplaces/wb/catalog.py); категории - marketplaces.wb.
+
   data_ozon - отчёт «Аналитика товаров» на data.ozon.ru:
       POST /p-api/exa-auth/analytics_what_to_sell/what_to_sell
       Нужна действующая сессия data.ozon.ru. Отдаёт не больше 100 строк за
@@ -46,7 +49,14 @@ from dataclasses import dataclass, field
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 
-from price_panel.app.settings import SOURCE_DATA_OZON, CategoryConfig, Settings
+from price_panel.app.settings import (
+    SOURCE_DATA_OZON,
+    SOURCE_WB_CATALOG,
+    CategoryConfig,
+    Settings,
+    SettingsError,
+)
+from price_panel.core.models import OZON, WB
 from price_panel.core.sampling import (
     GROUP_TAIL,
     GROUP_TOP,
@@ -65,6 +75,8 @@ from price_panel.infra.logger import get_logger
 from price_panel.infra.warehouse import Warehouse
 from price_panel.marketplaces.ozon import constants, session
 from price_panel.marketplaces.ozon.parse import API_BASE, FETCH_JSON_JS
+from price_panel.marketplaces.wb.adapter import SiteRefused
+from price_panel.marketplaces.wb.catalog import WbCatalogSource
 
 log = get_logger("discovery")
 
@@ -198,6 +210,8 @@ class ListingSource:
 
     :param new_page: создаёт вкладку в новом чистом контексте браузера.
     """
+
+    page_size = LISTING_PAGE_SIZE
 
     def __init__(
         self,
@@ -401,7 +415,7 @@ class ListingCrawl:
 
 
 def discover_listing(
-    source: ListingSource,
+    source: ListingSource | WbCatalogSource,
     category: CategoryConfig,
     top_needed: int,
     tail_needed: int,
@@ -447,7 +461,7 @@ def discover_listing(
     # кончилась раньше tail_max_page, - диапазон сужается и страница заменяется.
     # Хвост начинается за зоной top всей категории - даже если в этот раз top
     # не дозапрашивался (донабор одного хвоста).
-    first = max(page_number + 1, math.ceil(category.top_size / LISTING_PAGE_SIZE) + 1, 2)
+    first = max(page_number + 1, math.ceil(category.top_size / source.page_size) + 1, 2)
     last = min(category.tail_max_page, last_page) if last_page else category.tail_max_page
     visited: set = set()
     per_page = category.tail_items_per_page
@@ -519,6 +533,11 @@ def discover_data_ozon(source: DataOzonSource, category: CategoryConfig) -> tupl
 
 
 # ---------------------------------------------------------------- этап -----
+def site_title(wh: Warehouse) -> str:
+    """Название маркетплейса хранилища для сообщений."""
+    return "WB" if wh.marketplace == WB else "Ozon"
+
+
 def _needed(wh: Warehouse, category: CategoryConfig, rebuild: bool) -> tuple:
     if rebuild:
         return category.top_size, category.tail_size
@@ -609,12 +628,17 @@ def discover_category(
                 session.save_session(sessions.context, config.COOKIES_FILE)
         else:
             discovery_settings = settings.discovery
-            source = ListingSource(
-                sessions.new_page,
-                discovery_settings.request_delay,
-                discovery_settings.request_jitter,
-                discovery_settings.block_backoff,
-            )
+            if category.source == SOURCE_WB_CATALOG:
+                source = WbCatalogSource(
+                    sessions.new_page, settings.wb.request_delay, discovery_settings.request_jitter
+                )
+            else:
+                source = ListingSource(
+                    sessions.new_page,
+                    discovery_settings.request_delay,
+                    discovery_settings.request_jitter,
+                    discovery_settings.block_backoff,
+                )
             crawl = discover_listing(source, category, top_needed, tail_needed, exclude, rng)
             top, tail, result.listing_depth = crawl.top, crawl.tail, crawl.depth
             per_page = category.tail_items_per_page
@@ -642,8 +666,8 @@ def discover_category(
         if result.status == "blocked":
             notes.insert(
                 0,
-                "Ozon ограничил запросы: сохранено {} SKU, недостающие {} доберёт "
-                "повторный discover".format(result.selected, shortfall),
+                "{} ограничил запросы: сохранено {} SKU, недостающие {} доберёт "
+                "повторный discover".format(site_title(wh), result.selected, shortfall),
             )
         elif shortfall > 0:
             notes.append("не хватило кандидатов: {} SKU".format(shortfall))
@@ -659,7 +683,7 @@ def discover_category(
             result.selected_tail,
             result.note or None,
         )
-    except (DiscoveryError, PlaywrightError) as exc:
+    except (DiscoveryError, SiteRefused, PlaywrightError) as exc:
         result.status = "failed"
         result.note = str(exc).splitlines()[0]
         log.error("%s: discovery не удался: %s", category.name, result.note)
@@ -670,21 +694,32 @@ def discover_category(
 def run_discovery(
     wh: Warehouse, settings: Settings, names: list | None = None, rebuild: bool = False
 ) -> list:
-    """Этап discovery целиком. Возвращает CategoryResult по каждой категории."""
+    """Этап discovery целиком (маркетплейс - у хранилища). CategoryResult по каждой категории.
+
+    :raises SettingsError: discovery WB не включён или у WB нет категорий.
+    """
+    if wh.marketplace == WB:
+        # Как и сбор цен: panel WB в боевой базе - только когда аналитика их различает.
+        if not settings.wb.enabled:
+            raise SettingsError("discovery WB выключен: marketplaces.wb.enabled в config.yaml")
+        if not settings.wb.categories:
+            raise SettingsError("marketplaces.wb.categories: не задано ни одной категории")
     categories = (
-        [settings.category(name) for name in names]
+        [settings.category(name, wh.marketplace) for name in names]
         if names
-        else list(settings.discovery.categories)
+        else list(settings.categories(wh.marketplace))
     )
     log.info(
-        "DISCOVERY START categories=%s rebuild=%s seed=%s",
+        "DISCOVERY START marketplace=%s categories=%s rebuild=%s seed=%s",
+        wh.marketplace,
         ",".join(c.name for c in categories),
         rebuild,
         settings.discovery.seed,
     )
 
     state = None
-    if config.COOKIES_FILE.exists():
+    # cookies.json - сессия Ozon, другим маркетплейсам она не нужна.
+    if wh.marketplace == OZON and config.COOKIES_FILE.exists():
         state = session.load_session(config.COOKIES_FILE)
     elif any(c.source == SOURCE_DATA_OZON for c in categories):
         raise DiscoveryError("Для data_ozon нужна сессия: python get_cookies.py")
@@ -716,7 +751,7 @@ def run_discovery(
                 stop_note = ""
                 for index, category in enumerate(pending):
                     if stop_note:
-                        # Ozon ограничил запросы даже в новой сессии: следующая
+                        # Сайт ограничил запросы даже в новой сессии: следующая
                         # категория только продлила бы блокировку.
                         results[category.name] = CategoryResult(
                             category=category, status="stopped", note=stop_note
@@ -731,8 +766,8 @@ def run_discovery(
                     results[category.name] = result
                     if result.status == "blocked":
                         stop_note = (
-                            "не запускалась: Ozon ограничил запросы - повторите "
-                            "discover через 30-60 минут"
+                            "не запускалась: {} ограничил запросы - повторите "
+                            "discover через 30-60 минут".format(site_title(wh))
                         )
             finally:
                 sessions.close()
@@ -745,9 +780,10 @@ def run_discovery(
 
 
 def export_panel(wh: Warehouse, settings: Settings) -> int | None:
-    """Выгружает активную panel в CSV, если это задано в настройках."""
+    """Выгружает активную panel Ozon в CSV, если это задано в настройках."""
     path = settings.discovery.export_csv
-    if path is None:
+    # Файл - вход старого парсера parse_ozon.py: SKU других маркетплейсов в нём не место.
+    if path is None or wh.marketplace != OZON:
         return None
     try:
         count = wh.export_panel_csv(path)

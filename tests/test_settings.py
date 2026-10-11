@@ -184,9 +184,13 @@ def test_wildberries_defaults_and_repository_config():
     Включать сбор WB - только когда ozon-market-analytics различает маркетплейсы.
     """
     assert parse_settings(VALID).wb == settings_module.WildberriesSettings()
-    wb = load_settings(settings_module.DEFAULT_PATH).wb
+    settings = load_settings(settings_module.DEFAULT_PATH)
+    wb = settings.wb
     assert (wb.enabled, wb.dest, wb.batch_size) == (False, "-365341", 100)
     assert wb.request_delay >= 3
+    # Категории WB - те же, что у Ozon, чтобы panel можно было сравнивать.
+    assert [c.name for c in settings.categories("wb")] == [c.name for c in settings.categories()]
+    assert {c.source for c in settings.categories("wb")} == {"wb_catalog"}
 
 
 @pytest.mark.parametrize(

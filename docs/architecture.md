@@ -19,7 +19,8 @@
  DISCOVERY                       python -m price_panel discover
    листинг категории ozon.ru (Playwright + внутренний API фронтенда)
    или отчёт data.ozon.ru «Аналитика товаров» (опционально)
-   SKU из URL карточки -> дедупликация -> top + tail_random
+   WB (--marketplace wb): выдача категории запросом самого сайта
+   SKU из URL / id товара -> дедупликация -> top + tail_random
         |
         v
  SKU PANEL                       таблица sku_panel (+ data/panel_skus.csv)
@@ -97,7 +98,7 @@
 | `config.yaml` | Настройки конвейера: категории, sampling, расписание, benchmark |
 | `price_panel/__main__.py` | CLI конвейера: `python -m price_panel <команда>` |
 | `price_panel/app/pipeline.py` | Прогон парсера с учётом в `parse_runs`, benchmark |
-| `price_panel/app/discovery.py` | Discovery: листинг ozon.ru и data.ozon.ru, отбор в panel |
+| `price_panel/app/discovery.py` | Discovery: листинг ozon.ru и data.ozon.ru, общий обход top + хвост (и для WB), отбор в panel |
 | `price_panel/app/scheduler.py` | Ежедневный прогон: `schedule --once` и цикл для контейнера |
 | `price_panel/app/settings.py` | Чтение и проверка `config.yaml` |
 | `price_panel/marketplaces/ozon/parse.py` | Разбор карточки (API, HTML), повторы SKU; `OzonAdapter`: браузер, прогрев, перезапуски, темп |
@@ -108,6 +109,7 @@
 | `price_panel/marketplaces/ozon/constants.py` | Константы Ozon: токены сессии, признаки заглушки в ответе API, режимы парсера |
 | `price_panel/marketplaces/wb/adapter.py` | `WbAdapter`: проверка браузера WB, запрос карточек сайта, батчи, регион, темп |
 | `price_panel/marketplaces/wb/extract.py` | Разбор ответа карточек WB (u-card v4) в поля — без сети |
+| `price_panel/marketplaces/wb/catalog.py` | `WbCatalogSource`: выдача категории WB для discovery — запрос выдачи самого сайта, меняется только страница |
 | `price_panel/infra/warehouse.py` | PostgreSQL: миграции, panel, запуски, история, ошибки |
 | `price_panel/infra/migrations/*.sql` | Схема и аналитические представления (применяются сами) |
 | `price_panel/infra/browser.py` | Запуск браузера, ожидание антибот-проверки |

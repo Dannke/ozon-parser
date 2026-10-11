@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from price_panel.core.models import OZON, WB
 from price_panel.infra import config
 from price_panel.marketplaces.ozon import constants
 
@@ -29,10 +30,12 @@ DEFAULT_BACKUP_DIR = config.BASE_DIR / "backups"
 SOURCE_OZON_LISTING = "ozon_listing"
 SOURCE_DATA_OZON = "data_ozon"
 SOURCES = (SOURCE_OZON_LISTING, SOURCE_DATA_OZON)
+SOURCE_WB_CATALOG = "wb_catalog"
 
 # Имя категории попадает в логи, CSV и колонку sku_panel.category.
 NAME_RE = re.compile(r"[a-z0-9_]+")
 LISTING_URL_RE = re.compile(r"https://www\.ozon\.ru/category/[a-z0-9\-]+-\d+/?")
+WB_CATALOG_URL_RE = re.compile(r"https://www\.wildberries\.ru/catalog/\S+")
 DAILY_AT_RE = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 WB_DEST_RE = re.compile(r"-?\d+")
 
@@ -51,6 +54,7 @@ class CategoryConfig:
     source: str = SOURCE_OZON_LISTING
     title: str = ""
     # ozon_listing: адрес категории и диапазон страниц для случайного хвоста.
+    # wb_catalog: страница каталога или поиска WB, фильтры - в её адресе.
     url: str = ""
     tail_max_page: int = 300
     tail_items_per_page: int = 2
@@ -112,6 +116,8 @@ class WildberriesSettings:
     # Сколько карточек в одном запросе и пауза между запросами, секунды.
     batch_size: int = 100
     request_delay: float = 5.0
+    # Категории discovery WB (source wb_catalog); имена - как у Ozon.
+    categories: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -152,11 +158,15 @@ class Settings:
     wb: WildberriesSettings = field(default_factory=WildberriesSettings)
     path: Path | None = None
 
-    def category(self, name: str) -> CategoryConfig:
-        for category in self.discovery.categories:
+    def categories(self, marketplace: str = OZON) -> tuple:
+        """Категории discovery маркетплейса: Ozon - discovery, WB - marketplaces.wb."""
+        return self.wb.categories if marketplace == WB else self.discovery.categories
+
+    def category(self, name: str, marketplace: str = OZON) -> CategoryConfig:
+        for category in self.categories(marketplace):
             if category.name == name:
                 return category
-        known = ", ".join(c.name for c in self.discovery.categories)
+        known = ", ".join(c.name for c in self.categories(marketplace))
         raise SettingsError("Категории {!r} нет в конфигурации (есть: {})".format(name, known))
 
 
@@ -235,7 +245,10 @@ def _top_ratio(section: dict, default: float, where: str) -> float:
     return top
 
 
-def _category(raw: Any, defaults: dict) -> CategoryConfig:
+def _category(
+    raw: Any, defaults: dict, section: str = "discovery.categories", sources: tuple = SOURCES
+) -> CategoryConfig:
+    """Категория из config.yaml; источник по умолчанию - первый из sources."""
     if not isinstance(raw, dict):
         raise SettingsError("Категория должна быть словарём: {!r}".format(raw))
     name = str(raw.get("name") or "")
@@ -243,12 +256,12 @@ def _category(raw: Any, defaults: dict) -> CategoryConfig:
         raise SettingsError(
             "Имя категории {!r}: только латиница в нижнем регистре, цифры и '_'".format(name)
         )
-    where = "discovery.categories[{}].".format(name)
+    where = "{}[{}].".format(section, name)
 
-    source = str(raw.get("source") or SOURCE_OZON_LISTING)
-    if source not in SOURCES:
+    source = str(raw.get("source") or sources[0])
+    if source not in sources:
         raise SettingsError(
-            "{}source={!r}, допустимо: {}".format(where, source, ", ".join(SOURCES))
+            "{}source={!r}, допустимо: {}".format(where, source, ", ".join(sources))
         )
 
     url = str(raw.get("url") or "")
@@ -261,6 +274,11 @@ def _category(raw: Any, defaults: dict) -> CategoryConfig:
         )
     if source == SOURCE_DATA_OZON and not category_ids:
         raise SettingsError("{}category_ids: для data_ozon нужен хотя бы один id".format(where))
+    if source == SOURCE_WB_CATALOG and not WB_CATALOG_URL_RE.fullmatch(url):
+        raise SettingsError(
+            "{}url={!r}: нужна страница каталога или поиска "
+            "https://www.wildberries.ru/catalog/...".format(where, url)
+        )
 
     return CategoryConfig(
         name=name,
@@ -276,6 +294,13 @@ def _category(raw: Any, defaults: dict) -> CategoryConfig:
         category_ids=category_ids,
         sort_attribute=str(raw.get("sort_attribute") or "sum_gmv"),
     )
+
+
+def _unique_names(categories: tuple, section: str) -> None:
+    names = [category.name for category in categories]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise SettingsError("{}: повторяются имена {}".format(section, duplicates))
 
 
 def parse_settings(data: Any, path: Path | None = None) -> Settings:
@@ -294,10 +319,7 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
     categories = tuple(_category(raw, defaults) for raw in discovery.get("categories") or ())
     if not categories:
         raise SettingsError("discovery.categories: не задано ни одной категории")
-    names = [category.name for category in categories]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise SettingsError("discovery.categories: повторяются имена {}".format(duplicates))
+    _unique_names(categories, "discovery.categories")
 
     parser = _section(data, "parser")
     schedule = _section(data, "schedule")
@@ -318,6 +340,18 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
         raise SettingsError("marketplaces.wb.dest={!r}: ожидается целое число".format(wb_dest))
     if wb.get("enabled") and not wb_dest:
         raise SettingsError("marketplaces.wb: включён, но не задан dest (регион доставки)")
+    # У WB 100 товаров на странице, и выдача кончается раньше 100-й страницы
+    # (разведка 11.10.2026) - свои значения хвоста по умолчанию.
+    wb_defaults = dict(
+        defaults,
+        tail_max_page=_int(wb, "tail_max_page", 99, minimum=2, where="marketplaces.wb."),
+        tail_items_per_page=_int(wb, "tail_items_per_page", 5, minimum=1, where="marketplaces.wb."),
+    )
+    wb_categories = tuple(
+        _category(raw, wb_defaults, "marketplaces.wb.categories", (SOURCE_WB_CATALOG,))
+        for raw in wb.get("categories") or ()
+    )
+    _unique_names(wb_categories, "marketplaces.wb.categories")
 
     price_source = str(parser.get("price_source") or constants.PRICE_SOURCE_API)
     if price_source not in constants.PRICE_SOURCES:
@@ -360,6 +394,7 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
             ),
             # Чаще - уже не человеческий темп: у WB свой антибот (разведка 11.10.2026).
             request_delay=_float(wb, "request_delay", 5.0, minimum=3.0, where="marketplaces.wb."),
+            categories=wb_categories,
         ),
         backup=BackupSettings(
             enabled=bool(backup.get("enabled", False)),

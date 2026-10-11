@@ -182,15 +182,23 @@
 
 ### marketplaces.wb
 
-Сбор Wildberries: `python -m price_panel parse --marketplace wb`. Как устроен —
-[architecture.md](architecture.md#карточки-wildberries).
+Discovery и сбор Wildberries: `python -m price_panel discover / parse
+--marketplace wb`. Как устроены — [discovery.md](discovery.md#выдача-категории-wildberriesru)
+и [architecture.md](architecture.md#карточки-wildberries).
 
-| Ключ            | Сейчас    | Назначение |
-| --------------- | --------- | ---------- |
-| `enabled`       | `false`   | Разрешить сбор WB. Без него `parse --marketplace wb` — ошибка настроек (код 1). Включать, когда ozon-market-analytics различает маркетплейсы: иначе строки WB в боевой базе смешаются с Ozon. Если раздела нет — `false` |
-| `dest`          | `-365341` | Регион доставки WB (целое число): Новосибирск, ПВЗ «Чаплыгина 16». От него зависят наличие и сроки; пишется в `parse_runs.region`. Обязателен при `enabled: true` |
-| `batch_size`    | `100`     | Карточек в одном запросе, 1..100 |
-| `request_delay` | `5`       | Пауза между запросами к WB, с (не меньше 3), плюс случайные до 30 % |
+| Ключ                  | Сейчас    | Назначение |
+| --------------------- | --------- | ---------- |
+| `enabled`             | `false`   | Разрешить discovery и сбор WB. Без него `discover` / `parse --marketplace wb` — ошибка настроек (код 1). Включать, когда ozon-market-analytics различает маркетплейсы: иначе строки WB в боевой базе смешаются с Ozon. Если раздела нет — `false` |
+| `dest`                | `-365341` | Регион доставки WB (целое число): Новосибирск, ПВЗ «Чаплыгина 16». От него зависят наличие и сроки; пишется в `parse_runs.region`. Обязателен при `enabled: true` |
+| `batch_size`          | `100`     | Карточек в одном запросе, 1..100 |
+| `request_delay`       | `5`       | Пауза между запросами к WB — и карточек, и выдачи в discovery, с (не меньше 3); разброс — `discovery.request_jitter` у выдачи, до 30 % у карточек |
+| `tail_max_page`       | `99`      | Глубже какой страницы выдачи хвост не берётся (по умолчанию для категорий WB): сотая страница уже пуста |
+| `tail_items_per_page` | `5`       | Сколько товаров хвоста брать со страницы выдачи (по 100 на страницу) |
+| `categories`          | 4 категории | Те же имена, что у Ozon. Ключи — как у категории `discovery` (`name`, `title`, `panel_size`, `top_ratio`, `tail_max_page`, `tail_items_per_page`); `url` — страница каталога или поиска `https://www.wildberries.ru/catalog/...`, фильтр по предмету (`xsubject`) — прямо в адресе. `source` — только `wb_catalog` |
+
+Темп между категориями (`category_pause`), `seed` и `top_ratio` — общие, из
+`discovery`. Почему у категорий WB такие адреса и фильтры — в
+[discovery.md](discovery.md#выдача-категории-wildberriesru).
 
 Как найти `dest` своего региона: выбрать ПВЗ на wildberries.ru и посмотреть
 параметр `dest` в запросе `u-card/cards/v4/detail` (вкладка Network). Регион

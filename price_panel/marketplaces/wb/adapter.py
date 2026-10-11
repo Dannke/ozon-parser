@@ -126,7 +126,28 @@ def outcomes(body: dict, skus: Sequence[str], seconds: float, attempts: int = 1)
     return result
 
 
-def open_site(page: Page, context, skus: Sequence[str], pause: Callable) -> SiteRequest:
+def pass_browser_check(page: Page) -> None:
+    """Открывает главную WB и ждёт токен её проверки браузера (проходит JS сайта).
+
+    :raises SiteRefused: токена нет за TOKEN_WAIT_SECONDS.
+    """
+    log.info("Открываю %s (проверка браузера WB)", HOME_URL)
+    page.goto(HOME_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
+    deadline = time.monotonic() + TOKEN_WAIT_SECONDS
+    while TOKEN_COOKIE not in {c.get("name") for c in page.context.cookies()}:
+        if time.monotonic() > deadline:
+            raise SiteRefused("проверка браузера WB не пройдена за {} с".format(TOKEN_WAIT_SECONDS))
+        page.wait_for_timeout(1000)
+
+
+def wait_site_request(page: Page, seen: list) -> None:
+    """Ждёт, пока сайт сам сделает нужный запрос (seen пополняет обработчик page.on)."""
+    deadline = time.monotonic() + SITE_REQUEST_WAIT_SECONDS
+    while not seen and time.monotonic() < deadline:
+        page.wait_for_timeout(500)
+
+
+def open_site(page: Page, skus: Sequence[str], pause: Callable) -> SiteRequest:
     """Проходит проверку браузера и ловит запрос карточки самого сайта.
 
     :param pause: пауза перед открытием карточки - за прогон WB открываются
@@ -136,22 +157,14 @@ def open_site(page: Page, context, skus: Sequence[str], pause: Callable) -> Site
     """
     seen: list = []
     page.on("request", lambda request: seen.append(request) if DETAIL_PATH in request.url else None)
-    log.info("Открываю %s (проверка браузера WB)", HOME_URL)
-    page.goto(HOME_URL, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-    deadline = time.monotonic() + TOKEN_WAIT_SECONDS
-    while TOKEN_COOKIE not in {c.get("name") for c in context.cookies()}:
-        if time.monotonic() > deadline:
-            raise SiteRefused("проверка браузера WB не пройдена за {} с".format(TOKEN_WAIT_SECONDS))
-        page.wait_for_timeout(1000)
+    pass_browser_check(page)
     for sku in skus[:3]:
         pause()
         log.info("Открываю карточку %s, чтобы взять запрос сайта", sku)
         page.goto(
             CARD_URL.format(sku=sku), wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT
         )
-        deadline = time.monotonic() + SITE_REQUEST_WAIT_SECONDS
-        while not seen and time.monotonic() < deadline:
-            page.wait_for_timeout(500)
+        wait_site_request(page, seen)
         if seen:
             request = seen[0]
             return SiteRequest(url=request.url, headers=own_headers(request.all_headers()))
@@ -174,7 +187,7 @@ class WbAdapter:
             try:
                 page = context.new_page()
                 try:
-                    site = open_site(page, context, skus, lambda: self.sleep(self.delay))
+                    site = open_site(page, skus, lambda: self.sleep(self.delay))
                 except (SiteRefused, PlaywrightError) as exc:
                     log.error("WB: %s", exc)
                     # Как отказ сайта: предохранитель остановит сбор, повтор - позже.
