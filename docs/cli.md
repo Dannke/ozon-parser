@@ -20,10 +20,10 @@ python -m price_panel [--config PATH] <команда> [флаги]
 | ----------- | ----- | ---------- |
 | `migrate`   | — | Применить миграции схемы (делается и автоматически) |
 | `discover`  | `--category NAME` (можно повторять), `--rebuild` | Найти SKU и дописать `sku_panel` до `panel_size` каждой категории. `--rebuild` пересобирает panel заново: старая выключается (`is_active = false`) |
-| `panel`     | `--export PATH` | Состав panel по категориям и группам; `--export` выгружает активные SKU в CSV |
-| `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily`, `--missing-today` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик. `--missing-today` — только SKU panel, у которых за сегодня (по `schedule.timezone`) ещё нет успешного наблюдения: догон после блокировки; если таких нет — код 0 без прогона |
+| `panel`     | `--export PATH`, `--marketplace ozon\|wb` | Состав panel по категориям и группам; `--export` выгружает активные SKU в CSV |
+| `parse`     | `SKU ...`, `--file PATH`, `--category NAME`, `--limit N`, `--kind manual\|daily`, `--missing-today`, `--marketplace ozon\|wb` | Прогон парсера с записью в PostgreSQL. По умолчанию — активная panel; SKU аргументами или `--file` — вместо неё. `--kind daily` ставит планировщик. `--missing-today` — только SKU panel, у которых за сегодня (по `schedule.timezone`) ещё нет успешного наблюдения: догон после блокировки; если таких нет — код 0 без прогона |
 | `benchmark` | `--sample N`, `--seed S`, `--file PATH` | Замер скорости на случайных SKU panel (или из файла) и расчёт дневной ёмкости |
-| `runs`      | `--limit N` (10) | Последние прогоны и объём истории |
+| `runs`      | `--limit N` (10), `--marketplace ozon\|wb` | Последние прогоны и объём истории |
 | `backup`    | — | Резервная копия базы: `pg_dump` внутри контейнера `postgres` в `backup.dir` (`backups/ozon-ГГГГ-ММ-ДД.dump`), проверка архива через `pg_restore --list`, хранится `backup.keep` последних копий. Нужен запущенный Docker Desktop |
 | `schedule`  | `--once` | Ежедневный прогон: без флага — цикл до `daily_at` (контейнер), `--once` — выполнить прогон сейчас и выйти. Оповещения о начале и о повторе после блокировки, после прогона и повторов — `backup` (если `backup.enabled`) и оповещение об итоге. С `--once` оповещает и о том, что прогон не начался (база недоступна, ошибка настроек) |
 | `notify`    | — | Проверка Telegram-бота: пока `TELEGRAM_CHAT_ID` пуст — список чатов, которые писали боту (откуда взять id); иначе — проверочное сообщение, а перед ним — задержанные из очереди (если Telegram был недоступен). Базу и Ozon не трогает. Код 1 — не настроено или не отправлено (причина в `logs/notify.log`) |
@@ -44,6 +44,15 @@ python -m price_panel parse --kind daily --missing-today
 
 ```bash
 python -m price_panel panel --export data/panel.csv
+```
+
+`--marketplace` (по умолчанию `ozon`) выбирает, с чьими panel, прогонами и
+историей работать. Сбор WB (`parse --marketplace wb`) разрешён только при
+`marketplaces.wb.enabled: true` в `config.yaml`, иначе — код 1. Discovery для
+WB пока нет: SKU — аргументами или `--file`.
+
+```bash
+python -m price_panel parse --marketplace wb 1343721205 1468131190
 ```
 
 Пример вывода `discover` (живой запуск 29.09.2026, пилотная panel по 20 SKU):

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from price_panel.app import discovery, pipeline, scheduler
 from price_panel.app.settings import Settings, SettingsError, load_settings
+from price_panel.core.models import OZON, WB
 from price_panel.infra import backup, config, notify
 from price_panel.infra.db import DatabaseError
 from price_panel.infra.logger import get_logger
@@ -31,8 +32,8 @@ from price_panel.infra.warehouse import Warehouse
 log = get_logger("pipeline")
 
 
-def _warehouse() -> Warehouse:
-    wh = Warehouse()
+def _warehouse(marketplace: str = OZON) -> Warehouse:
+    wh = Warehouse(marketplace=marketplace)
     wh.migrate()
     return wh
 
@@ -120,7 +121,7 @@ def cmd_discover(args, settings: Settings) -> int:
 
 
 def cmd_panel(args, settings: Settings) -> int:
-    with _warehouse() as wh:
+    with _warehouse(args.marketplace) as wh:
         print_panel(wh)
         if args.export:
             count = wh.export_panel_csv(args.export)
@@ -151,7 +152,7 @@ def cmd_parse(args, settings: Settings) -> int:
     if args.missing_today and (args.skus or args.file):
         log.error("--missing-today работает только с panel, без списка SKU и --file")
         return 2
-    with _warehouse() as wh:
+    with _warehouse(args.marketplace) as wh:
         skus, source = _skus_for_parse(args, wh, settings)
         if not skus and args.missing_today and wh.panel_skus(args.category, limit=1):
             log.info("Все SKU panel за сегодня уже собраны - парсить нечего")
@@ -185,7 +186,7 @@ def cmd_benchmark(args, settings: Settings) -> int:
 def cmd_runs(args, settings: Settings) -> int:
     # База в контейнере живёт в UTC - время показываем в поясе расписания.
     tz = scheduler.get_timezone(settings.schedule.timezone)
-    with _warehouse() as wh:
+    with _warehouse(args.marketplace) as wh:
         rows = wh.recent_runs(args.limit)
         print("Время - {}".format(settings.schedule.timezone))
         print(
@@ -278,6 +279,15 @@ def cmd_notify(args, settings: Settings) -> int:
 
 
 # ------------------------------------------------------------------ разбор --
+def add_marketplace(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--marketplace",
+        choices=[OZON, WB],
+        default=OZON,
+        help="маркетплейс (по умолчанию ozon); сбор wb - при marketplaces.wb.enabled",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m price_panel", description="Конвейер discovery -> panel -> parse"
@@ -302,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     panel = commands.add_parser("panel", help="состав panel")
     panel.add_argument("--export", type=Path, help="выгрузить активные SKU в CSV")
+    add_marketplace(panel)
     panel.set_defaults(func=cmd_panel)
 
     parse = commands.add_parser("parse", help="прогон парсера с записью в PostgreSQL")
@@ -321,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="только SKU panel, у которых за сегодня (schedule.timezone) ещё "
         "нет успешного наблюдения - догон после блокировки",
     )
+    add_marketplace(parse)
     parse.set_defaults(func=cmd_parse)
 
     bench = commands.add_parser("benchmark", help="замер скорости парсера")
@@ -331,6 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs = commands.add_parser("runs", help="последние прогоны парсера")
     runs.add_argument("--limit", type=int, default=10)
+    add_marketplace(runs)
     runs.set_defaults(func=cmd_runs)
 
     commands.add_parser("backup", help="резервная копия базы (backup в config.yaml)").set_defaults(

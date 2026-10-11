@@ -1,12 +1,14 @@
 """Прогон парсера по sku_panel (или файлу) с записью в PostgreSQL.
 
-Карточки собирает адаптер Ozon, цикл - ядро (core.collect), как и у
-parse_ozon.py. Здесь к нему добавляется учёт запуска:
+Карточки собирает адаптер маркетплейса, к которому привязано хранилище
+(Ozon или WB), цикл - ядро (core.collect), как и у parse_ozon.py. Здесь к
+нему добавляется учёт запуска:
 
     parse_runs     - запуск: когда, сколько SKU, сколько успешно, скорость;
     products       - последние атрибуты карточки;
     price_history  - наблюдение цены, рейтинга, отзывов на момент сбора;
-    parse_errors   - причина неудачи по каждому проблемному SKU.
+    parse_errors   - причина неудачи по каждому проблемному SKU;
+    raw_products   - сырой ответ сайта (у WB), хранится RAW_KEEP_DAYS дней.
 
 Товар пишется в базу сразу после разбора, до перехода к следующему SKU
 (RunObserver), поэтому сбой посреди ночного прогона не теряет уже собранное.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import logging
 import random
 import statistics
 import time
@@ -23,9 +26,16 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from price_panel.app.settings import Settings
-from price_panel.core.collect import Observers, RowBatches, RunObserver, collect
-from price_panel.core.models import EXIT_BLOCKED
+from price_panel.app.settings import Settings, SettingsError
+from price_panel.core.collect import (
+    Breaker,
+    MarketplaceAdapter,
+    Observers,
+    RowBatches,
+    RunObserver,
+    collect,
+)
+from price_panel.core.models import EXIT_BLOCKED, WB
 from price_panel.infra import config
 from price_panel.infra.csv_file import write_csv
 from price_panel.infra.db import DatabaseError
@@ -33,6 +43,7 @@ from price_panel.infra.logger import get_logger
 from price_panel.infra.warehouse import Warehouse
 from price_panel.marketplaces.ozon import parse
 from price_panel.marketplaces.ozon.extract import FIELDS
+from price_panel.marketplaces.wb import adapter as wb
 
 log = get_logger("pipeline")
 
@@ -190,35 +201,80 @@ def csv_export(path: Path) -> RowBatches:
     return RowBatches(save, config.BATCH_SIZE)
 
 
+@dataclass(frozen=True)
+class Collector:
+    """Чем и как собирать прогон: адаптер маркетплейса и его параметры."""
+
+    adapter: MarketplaceAdapter
+    log: logging.Logger
+    request_delay: float
+    region: str | None = None
+    csv_path: Path | None = None
+    # Параметры маркетплейса для строки PARSER START.
+    describe: str = ""
+
+
+def collector(wh: Warehouse, skus: list, settings: Settings) -> Collector:
+    """Адаптер маркетплейса, к которому привязано хранилище.
+
+    :raises SettingsError: сбор WB не включён в config.yaml.
+    """
+    if wh.marketplace == WB:
+        # Пока ozon-market-analytics не различает маркетплейсы, строки WB в
+        # боевой базе смешались бы с Ozon - поэтому сбор WB включается явно.
+        if not settings.wb.enabled:
+            raise SettingsError("сбор WB выключен: marketplaces.wb.enabled в config.yaml")
+        options = settings.wb
+        return Collector(
+            adapter=wb.WbAdapter(options.dest, options.batch_size, options.request_delay),
+            log=wb.log,
+            request_delay=options.request_delay,
+            region=options.dest,
+            describe="dest={} batch_size={}".format(options.dest, options.batch_size),
+        )
+    details_due = details_schedule(wh, skus, settings.parser.details_refresh_days)
+    options = parse.ParseOptions(price_source=settings.parser.price_source, details_for=details_due)
+    return Collector(
+        adapter=parse.OzonAdapter(options),
+        log=parse.log,
+        request_delay=config.REQUEST_DELAY,
+        csv_path=settings.parser.csv_export,
+        describe="page_interval={:.1f} price_source={} details={}".format(
+            config.PAGE_INTERVAL,
+            options.price_source,
+            len(skus) if details_due is None else len(details_due),
+        ),
+    )
+
+
 def run_parse(
     wh: Warehouse, skus: list, settings: Settings, kind: str = "manual", sku_source: str = "panel"
 ) -> ParseReport:
     """Парсит SKU и ведёт учёт прогона в базе.
 
     :raises ParseLockBusy: параллельно идёт другой прогон.
+    :raises SettingsError: маркетплейс не настроен (collector).
     """
+    source = collector(wh, skus, settings)
     if not wh.try_parse_lock():
         raise ParseLockBusy("Уже идёт другой прогон парсера (блокировка в PostgreSQL занята)")
     stale = wh.close_stale_runs()
     if stale:
         log.warning("Прогонов, брошенных упавшим процессом, помечено interrupted: %s", stale)
 
-    details_due = details_schedule(wh, skus, settings.parser.details_refresh_days)
-    options = parse.ParseOptions(price_source=settings.parser.price_source, details_for=details_due)
-    run_id = wh.start_parse_run(kind, sku_source, len(skus), config.REQUEST_DELAY)
+    run_id = wh.start_parse_run(kind, sku_source, len(skus), source.request_delay, source.region)
     observer = WarehouseObserver(wh, run_id)
-    csv_path = settings.parser.csv_export
+    csv_path = source.csv_path
     log.info(
-        "PARSER START run_id=%s kind=%s source=%s total=%s request_delay=%.1f "
-        "page_interval=%.1f price_source=%s details=%s csv=%s",
+        "PARSER START run_id=%s marketplace=%s kind=%s source=%s total=%s request_delay=%.1f "
+        "%s csv=%s",
         run_id,
+        wh.marketplace,
         kind,
         sku_source,
         len(skus),
-        config.REQUEST_DELAY,
-        config.PAGE_INTERVAL,
-        options.price_source,
-        len(skus) if details_due is None else len(details_due),
+        source.request_delay,
+        source.describe,
         csv_path or "-",
     )
 
@@ -226,11 +282,12 @@ def run_parse(
     export = csv_export(csv_path) if csv_path else None
     try:
         collect(
-            parse.OzonAdapter(options),
+            source.adapter,
             skus,
             Observers(observer, export) if export else observer,
-            parse.breaker(),
-            parse.log,
+            # Порог один для всех: у WB отказ батча - antibot у каждого его SKU.
+            Breaker(config.MAX_CONSECUTIVE_FAILURES, config.MAX_CONSECUTIVE_CHALLENGES),
+            source.log,
         )
         if export:
             export.flush()
@@ -242,7 +299,7 @@ def run_parse(
                 observer.sku_failed(
                     sku,
                     "not_processed",
-                    "прогон завершился до обработки SKU (см. logs/parse_ozon.log)",
+                    "прогон завершился до обработки SKU (см. logs/{}.log)".format(source.log.name),
                     0.0,
                 )
         duration = time.monotonic() - started
@@ -257,6 +314,7 @@ def run_parse(
             avg_sku_seconds=statistics.mean(observer.durations) if observer.durations else None,
             status=run_status(observer.success, observer.errors),
             exit_code=1,
+            request_delay=source.request_delay,
         )
         speed = report.sku_per_minute
         try:
@@ -272,6 +330,13 @@ def run_parse(
             )
         except DatabaseError as exc:
             log.error("Итог прогона %s не записан: %s", run_id, exc)
+        try:
+            pruned = wh.prune_raw()
+        except DatabaseError as exc:
+            log.error("Старые сырые ответы не удалены: %s", exc)
+        else:
+            if pruned:
+                log.info("Удалено сырых ответов старше срока хранения: %s", pruned)
 
     ok = (
         report.success > 0

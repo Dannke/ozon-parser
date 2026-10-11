@@ -307,8 +307,7 @@ def test_exported_panel_is_readable_by_legacy_parser(wh):
 # ------------------------------------------------ несколько маркетплейсов --
 @pytest.fixture
 def wb(wh):
-    """Хранилище второго маркетплейса на той же тестовой базе."""
-    wh.run(lambda cursor: cursor.execute("INSERT INTO marketplaces VALUES ('wb', 'Wildberries')"))
+    """Хранилище второго маркетплейса на той же тестовой базе (строку wb добавила 0005)."""
     store = Warehouse(TEST_DSN, marketplace="wb")
     yield store
     store.close()
@@ -386,3 +385,28 @@ def test_observation_cannot_land_in_another_marketplaces_run(wh, wb):
     assert wb.history_counts() == (0, 0, 0) and wh.history_counts() == (0, 0, 0)
     with pytest.raises(warehouse.db.DatabaseError, match="parse_errors_run_fkey"):
         wb.record_error(ozon_run, "1", "fetch_error", "403", 1)
+
+
+def test_raw_answer_is_stored_with_the_observation_and_pruned(wh, wb):
+    """Сырой ответ WB лежит рядом с наблюдением; через 90 дней его удаляет prune_raw."""
+    run_id = wb.start_parse_run("manual", "args", 2, 5.0, region="-365341")
+    old = dt.datetime.now(dt.UTC) - dt.timedelta(days=91)
+    wb.record_product(run_id, PRODUCT | {"sku": "1", "raw": {"id": 1, "name": "Тест"}}, old)
+    wb.record_product(run_id, PRODUCT | {"sku": "2", "raw": {"id": 2}})
+    # У Ozon сырого ответа нет - и строк в raw_products тоже.
+    wh.record_product(wh.start_parse_run("manual", "args", 1, 3.0), PRODUCT | {"sku": "1"})
+
+    def raw(cursor):
+        cursor.execute("SELECT marketplace, sku, payload FROM raw_products ORDER BY sku")
+        return cursor.fetchall()
+
+    def region(cursor):
+        cursor.execute("SELECT region FROM parse_runs WHERE run_id = %s", (run_id,))
+        return cursor.fetchone()[0]
+
+    assert wb.run(raw) == [("wb", "1", {"id": 1, "name": "Тест"}), ("wb", "2", {"id": 2})]
+    assert wb.run(region) == "-365341"
+    assert wh.prune_raw() == 0  # чужие строки Ozon не трогает
+    assert wb.prune_raw() == 1
+    assert [row[1] for row in wb.run(raw)] == ["2"]
+    assert wb.history_counts() == (2, 2, 1)  # история цен остаётся

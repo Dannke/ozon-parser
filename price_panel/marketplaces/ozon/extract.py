@@ -26,6 +26,7 @@ from collections.abc import Iterator
 from html.parser import HTMLParser
 from typing import Any
 
+from price_panel.core.quality import discount_pct
 from price_panel.marketplaces.ozon import constants
 
 # Порядок колонок в CSV и таблицах БД.
@@ -336,15 +337,6 @@ def extract_offer(page_json: dict) -> dict:
                 break
 
     return {"card_price": card_price, "old_price": old_price, "is_available": is_available}
-
-
-def discount_pct(price: float | None, old_price: float | None) -> float | None:
-    """Скидка price относительно зачёркнутой цены, % (None - зачёркнутой нет)."""
-    if not price or not old_price:
-        return None
-    if old_price <= price:
-        return 0.0
-    return round((old_price - price) / old_price * 100, 2)
 
 
 def extract_score(page_json: dict) -> tuple:

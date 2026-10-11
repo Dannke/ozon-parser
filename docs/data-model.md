@@ -25,32 +25,36 @@ advisory lock и одной транзакцией. Любая команда `p
 | `0002_analytics_views`            | Аналитические представления                           |
 | `0003_parse_run_blocked_status`   | Статус прогона `blocked` (сработал предохранитель)    |
 | `0004_multi_marketplace`          | Колонка `marketplace` во всех таблицах конвейера, справочник `marketplaces`, составные ключи, `parse_runs.region`; представления — с `marketplace` |
+| `0005_wildberries`                | Маркетплейс `wb` в справочнике, таблица `raw_products` (сырые ответы)          |
 
 Как добавить миграцию — в [development.md](development.md#миграции).
 
 ## Таблицы
 
 Во всех таблицах ниже есть колонка `marketplace` — код маркетплейса из
-справочника `marketplaces` (сейчас там только `ozon`). Всё собранное до
-миграции `0004` — Ozon.
+справочника `marketplaces` (`ozon`, `wb`). Всё собранное до миграции `0004` —
+Ozon. Сбор WB включается `marketplaces.wb.enabled` в `config.yaml`: пока
+ozon-market-analytics не различает маркетплейсы, строк `wb` в боевой базе нет.
 
 | Таблица          | Что хранит                                                              |
 | ---------------- | ----------------------------------------------------------------------- |
-| `marketplaces`   | Справочник маркетплейсов: `code` (`ozon`), `title` |
+| `marketplaces`   | Справочник маркетплейсов: `code` (`ozon`, `wb`), `title` |
 | `sku_panel`      | Panel: `sku` (уникален внутри маркетплейса), `category`, `source`, `source_url`, `position`, `page`, `sampling_group` (`top` / `tail_random`), `is_active`, `first_seen_at` / `last_seen_at` (когда discovery видел товар в выдаче), `created_at`, `updated_at`, `deactivated_at` |
 | `discovery_runs` | Запуски discovery: категория, источник, seed, запросов, найдено, отобрано, статус и причина неудачи |
-| `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay`, `region` (регион сбора: у Ozon пусто — регион он определяет по IP, см. issue #4) |
+| `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay` (у WB — пауза между батчами), `region` (регион сбора: у WB — `dest` из `config.yaml`; у Ozon пусто — регион он определяет по IP, см. issue #4) |
 | `products`       | Последние атрибуты карточки: название, картинка, цвет, материал, комплектация, фото/видео, rich-контент |
-| `price_history`  | Наблюдение на момент сбора: `collected_at`, `price`, `card_price` (с Ozon Картой), `old_price` (зачёркнутая), `discount_pct`, `is_available`, `rating`, `reviews_total`, `source`, `run_id` |
+| `price_history`  | Наблюдение на момент сбора: `collected_at`, `price`, `card_price` (с Ozon Картой; у WB пусто), `old_price` (зачёркнутая), `discount_pct`, `is_available`, `rating`, `reviews_total`, `source`, `run_id` |
 | `parse_errors`   | Ошибка по SKU: `run_id`, `sku`, `occurred_at`, `error_type`, `error_message`, `attempts` |
+| `raw_products`   | Сырой ответ сайта по SKU (сейчас только WB): `run_id`, `sku`, `collected_at`, `payload` (JSONB, без служебных полей). Пишется той же транзакцией, что и наблюдение; старше 90 дней удаляется после каждого прогона (`Warehouse.prune_raw`) |
 
 Типы ошибок в `parse_errors.error_type`:
 
 | Тип             | Значение                                                          |
 | --------------- | ----------------------------------------------------------------- |
-| `not_found`     | Карточки нет (HTTP 404), повторов не было                          |
+| `not_found`     | Карточки нет (HTTP 404; у WB — её нет в ответе), повторов не было  |
 | `fetch_error`   | Данные не получены ни из API, ни из HTML после всех попыток        |
-| `antibot`       | Антибот-проверка на странице товара не прошла за `CHALLENGE_TIMEOUT`; без повторов |
+| `antibot`       | Антибот-проверка на странице товара не прошла за `CHALLENGE_TIMEOUT`; у WB — отказ 403 / 429 / 498 на батч; без повторов |
+| `invalid_data`  | Карточка пришла, но запись не прошла проверку (`core.quality`: цена 0 или больше 10 млн, зачёркнутая ниже цены, рейтинг вне 0..5) и в историю не попала |
 | `timeout`       | Таймаут загрузки страницы                                         |
 | `browser_error` | Прочая ошибка браузера                                            |
 | `storage_error` | Карточка разобрана, но не записалась в PostgreSQL                  |
@@ -188,3 +192,24 @@ ORDER BY category, observed_date;
 07.10.2026) почти все наблюдения — `html`, а значения те же, что в API: режим
 сверен на живых карточках (см.
 [architecture.md](architecture.md#как-устроен-парсинг-карточки)).
+
+### Поля карточки Wildberries
+
+Ответ карточек WB (`u-card v4`) разбирает `marketplaces/wb/extract.py`. Правило
+цены сверено с ценами на странице 11.10.2026 (см.
+[verification-log.md](verification-log.md)):
+
+| Поле            | Источник у WB                                                       |
+| --------------- | ------------------------------------------------------------------- |
+| `title`         | `name`                                                              |
+| `price`         | `sizes[].price.product` / 100 — минимальная среди размеров с ценой  |
+| `old_price`     | `sizes[].price.basic` / 100, если выше `price`                      |
+| `card_price`    | пусто: цену с WB Кошельком (на 2 % ниже) считает сайт, в ответе её нет |
+| `is_available`  | есть цена и `totalQuantity` > 0                                     |
+| `rating`        | `reviewRating`; пусто, если отзывов нет (0 у WB — «нет оценки»)     |
+| `reviews_total` | `feedbacks`                                                         |
+| `color`         | `colors[0].name`                                                    |
+| `photos_seller` | `pics`                                                              |
+
+`cover_image`, `material`, `art_set`, `has_rich_content`, `videos_seller` у WB
+пока пусты. `source` — `api`.

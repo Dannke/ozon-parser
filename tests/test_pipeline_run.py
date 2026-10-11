@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from price_panel.app import pipeline
-from price_panel.app.settings import parse_settings
-from price_panel.core.models import SkuOutcome
+from price_panel.app.settings import SettingsError, parse_settings
+from price_panel.core.models import OZON, WB, SkuOutcome
 from price_panel.infra import config
 from price_panel.infra.db import DatabaseError
 from price_panel.infra.skus import read_skus_file
@@ -40,13 +40,15 @@ SETTINGS = parse_settings(SETTINGS_DATA)
 class FakeWarehouse(Warehouse):
     """Хранилище в памяти с тем же интерфейсом, что у Warehouse."""
 
-    def __init__(self, broken_skus=(), locked=False):  # без подключения к базе
+    def __init__(self, broken_skus=(), locked=False, marketplace=OZON):  # без подключения к базе
+        self.marketplace = marketplace
         self.broken = set(broken_skus)
         self.locked = locked
         self.products: list = []
         self.errors: list = []
         self.runs: dict = {}
         self.without_details: set = set()
+        self.pruned = 0
 
     def try_parse_lock(self):
         return not self.locked
@@ -54,8 +56,14 @@ class FakeWarehouse(Warehouse):
     def close_stale_runs(self):
         return 0
 
-    def start_parse_run(self, kind, sku_source, total_sku, request_delay):
-        self.runs[1] = {"kind": kind, "source": sku_source, "total": total_sku}
+    def start_parse_run(self, kind, sku_source, total_sku, request_delay, region=None):
+        self.runs[1] = {
+            "kind": kind,
+            "source": sku_source,
+            "total": total_sku,
+            "delay": request_delay,
+            "region": region,
+        }
         return 1
 
     def finish_parse_run(
@@ -88,6 +96,10 @@ class FakeWarehouse(Warehouse):
 
     def skus_without_details(self, skus):
         return set(self.without_details)
+
+    def prune_raw(self, keep_days=90):
+        self.pruned += 1
+        return 0
 
 
 def scripted(monkeypatch, results: dict | None = None, stop: str | None = None) -> list:
@@ -251,6 +263,65 @@ def test_csv_export_writes_the_panel_snapshot(monkeypatch, tmp_path):
     assert [line.split(",")[0] for line in lines[1:]] == ["1", "3"]
 
 
+WB_DATA = {"wb": {"enabled": True, "dest": "-365341", "batch_size": 50, "request_delay": 6}}
+
+
+def test_wb_collection_must_be_enabled_explicitly():
+    """Строки WB не попадут в базу, пока marketplaces.wb.enabled не включён."""
+    wh = FakeWarehouse(marketplace=WB)
+    with pytest.raises(SettingsError, match="enabled"):
+        pipeline.run_parse(wh, ["1"], SETTINGS)
+    assert wh.runs == {} and wh.products == []
+
+
+def test_wb_run_uses_wb_adapter_and_its_settings(monkeypatch, tmp_path):
+    """Хранилище WB - адаптер WB: свой регион и темп, CSV старого формата не пишется."""
+    created: list = []
+
+    class Adapter:
+        def __init__(self, dest, batch_size, delay):
+            created.append((dest, batch_size, delay))
+
+        def collect(self, skus):
+            for sku in skus:
+                yield SkuOutcome(sku=sku, product={"sku": sku, "price": 1.0}, seconds=0.1)
+            return None
+
+    monkeypatch.setattr(pipeline.wb, "WbAdapter", Adapter)
+    path = tmp_path / "panel_products.csv"
+    settings = parse_settings(
+        dict(SETTINGS_DATA, parser={"csv_export": str(path)}, marketplaces=WB_DATA)
+    )
+    wh = FakeWarehouse(marketplace=WB)
+    report = pipeline.run_parse(wh, ["1", "2"], settings)
+
+    assert created == [("-365341", 50, 6.0)]
+    assert wh.products == ["1", "2"] and report.status == "success"
+    assert (wh.runs[1]["region"], wh.runs[1]["delay"]) == ("-365341", 6.0)
+    assert report.request_delay == 6.0
+    assert not path.exists()
+    assert wh.pruned == 1
+
+
+def test_cli_passes_marketplace_to_the_warehouse(monkeypatch):
+    from price_panel import __main__ as cli
+
+    seen: list = []
+
+    def warehouse(**kwargs):
+        seen.append(kwargs)
+        store = QueueWarehouse(["1"])
+        store.marketplace = kwargs["marketplace"]
+        return store
+
+    monkeypatch.setattr(cli, "Warehouse", warehouse)
+    monkeypatch.setattr(cli, "load_settings", lambda path: SETTINGS)
+    scripted(monkeypatch)
+    # Сбор WB без enabled - ошибка настройки, а не прогон.
+    assert cli.main(["parse", "--marketplace", "wb", "1"]) == 1
+    assert seen == [{"marketplace": WB}]
+
+
 def test_storage_none_backend_writes_nothing():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "products.csv"
@@ -308,7 +379,7 @@ class QueueWarehouse(FakeWarehouse):
 def run_cli(monkeypatch, wh, *argv):
     from price_panel import __main__ as cli
 
-    monkeypatch.setattr(cli, "Warehouse", lambda: wh)
+    monkeypatch.setattr(cli, "Warehouse", lambda **kw: wh)
     monkeypatch.setattr(cli, "load_settings", lambda path: SETTINGS)
     scripted(monkeypatch)
     return cli.main(["parse", *argv])

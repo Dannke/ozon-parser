@@ -1,0 +1,488 @@
+{
+ "_source": "www.wildberries.ru/__internal/u-card/cards/v4/detail, 11.10.2026, dest=1259570991; служебные поля logs/payload убраны",
+ "products": [
+  {
+   "id": 1343721205,
+   "root": 3462492884,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Смартфон i17 Pro Max 16ГБ+1024ГБ, Тёмно-синий, 8000 мАч",
+   "entity": "",
+   "supplier": "HK PrimeТех",
+   "supplierId": 250170573,
+   "supplierRating": 4.3,
+   "pics": 20,
+   "picsUpdate": 1,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 14,
+   "panelPromoId": 1057123,
+   "volume": 16,
+   "weight": 0.4,
+   "promotions": [
+    1003057,
+    1006716,
+    1006966,
+    1017350,
+    1022645,
+    1022681,
+    1038846,
+    1039748,
+    1044666,
+    1050848,
+    1051559,
+    1052231,
+    1054394,
+    1054429,
+    1055520,
+    1056991,
+    1057123,
+    1058382,
+    1058383,
+    1059205,
+    1059236
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": [
+      {
+       "wh": 218991,
+       "dist": 138,
+       "qty": 37,
+       "priority": 48613,
+       "time1": 120,
+       "time2": 62
+      }
+     ],
+     "time1": 120,
+     "time2": 62,
+     "wh": 218991,
+     "dist": 138,
+     "price": {
+      "basic": 1314800,
+      "product": 709900,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     }
+    }
+   ],
+   "totalQuantity": 37,
+   "time1": 120,
+   "time2": 62,
+   "wh": 218991,
+   "dist": 138
+  },
+  {
+   "id": 1468131190,
+   "root": 3976812143,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Cмартфон Infinix Note 60 Pro 5G игровой телефон Android 16",
+   "entity": "",
+   "supplier": "3C Smart Официальный",
+   "supplierId": 250183977,
+   "supplierRating": 4.7,
+   "pics": 17,
+   "picsUpdate": 3,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 12,
+   "panelPromoId": 1057123,
+   "volume": 4,
+   "weight": 0.3,
+   "promotions": [
+    1003057,
+    1006716,
+    1007163,
+    1011952,
+    1017350,
+    1019807,
+    1021510,
+    1026324,
+    1038846,
+    1039748,
+    1050848,
+    1051559,
+    1052231,
+    1054394,
+    1054429,
+    1055520,
+    1056991,
+    1057123,
+    1059205,
+    1059236
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": [
+      {
+       "wh": 218991,
+       "dist": 138,
+       "qty": 37,
+       "priority": 48613,
+       "time1": 120,
+       "time2": 62
+      }
+     ],
+     "time1": 120,
+     "time2": 62,
+     "wh": 218991,
+     "dist": 138,
+     "price": {
+      "basic": 7053000,
+      "product": 1269500,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     }
+    }
+   ],
+   "totalQuantity": 37,
+   "time1": 120,
+   "time2": 62,
+   "wh": 218991,
+   "dist": 138,
+   "colors": [
+    {
+     "name": "серый",
+     "id": 8421504
+    }
+   ]
+  },
+  {
+   "id": 1506835913,
+   "root": 4213046291,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Cмартфон iPhone i 17 Pro Max игровой телефон NFC 5G 144Hz",
+   "entity": "",
+   "supplier": "3C Smart Официальный",
+   "supplierId": 250183977,
+   "supplierRating": 4.7,
+   "pics": 16,
+   "picsUpdate": 1,
+   "rating": 0,
+   "reviewRating": 0,
+   "feedbacks": 0,
+   "panelPromoId": 1057123,
+   "volume": 4,
+   "weight": 0.3,
+   "promotions": [
+    1007163,
+    1011952,
+    1021510,
+    1038846,
+    1057123,
+    1059236
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": [
+      {
+       "wh": 218991,
+       "dist": 138,
+       "qty": 37,
+       "priority": 48613,
+       "time1": 120,
+       "time2": 62
+      }
+     ],
+     "time1": 120,
+     "time2": 62,
+     "wh": 218991,
+     "dist": 138,
+     "price": {
+      "basic": 6520700,
+      "product": 1173700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     }
+    }
+   ],
+   "totalQuantity": 37,
+   "time1": 120,
+   "time2": 62,
+   "wh": 218991,
+   "dist": 138
+  },
+  {
+   "id": 1468133732,
+   "root": 3976812143,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Cмартфон Infinix Note 60 Pro 5G Android 16",
+   "entity": "",
+   "supplier": "3C Smart Официальный",
+   "supplierId": 250183977,
+   "supplierRating": 4.7,
+   "pics": 17,
+   "picsUpdate": 4,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 14,
+   "panelPromoId": 1057123,
+   "volume": 4,
+   "weight": 0.3,
+   "promotions": [
+    1003057,
+    1006716,
+    1007163,
+    1011952,
+    1017350,
+    1019807,
+    1021510,
+    1026324,
+    1038846,
+    1039748,
+    1050848,
+    1051559,
+    1052231,
+    1054394,
+    1054429,
+    1055520,
+    1056991,
+    1057123,
+    1059205,
+    1059236
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": [
+      {
+       "wh": 218991,
+       "dist": 138,
+       "qty": 37,
+       "priority": 48613,
+       "time1": 120,
+       "time2": 62
+      }
+     ],
+     "time1": 120,
+     "time2": 62,
+     "wh": 218991,
+     "dist": 138,
+     "price": {
+      "basic": 7053000,
+      "product": 1269500,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     }
+    }
+   ],
+   "totalQuantity": 37,
+   "time1": 120,
+   "time2": 62,
+   "wh": 218991,
+   "dist": 138
+  },
+  {
+   "id": 1650108423,
+   "root": 2765307603,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Смартфон Samsung Galaxy S26 Ultra",
+   "entity": "",
+   "supplier": "Smartphone",
+   "supplierId": 4219779,
+   "supplierRating": 3.5,
+   "pics": 10,
+   "picsUpdate": 2,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 29,
+   "volume": 10,
+   "weight": 0.501,
+   "isNew": true,
+   "promotions": [
+    1003057,
+    1003864,
+    1006716,
+    1006966,
+    1017350,
+    1022645,
+    1022681,
+    1038846,
+    1039748,
+    1044666,
+    1050848,
+    1052231,
+    1053953,
+    1055520,
+    1056991,
+    1059205,
+    1059236
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": [
+      {
+       "wh": 218804,
+       "dist": 122,
+       "qty": 37,
+       "priority": 61517,
+       "time1": 24,
+       "time2": 57
+      }
+     ],
+     "time1": 24,
+     "time2": 57,
+     "wh": 218804,
+     "dist": 122,
+     "price": {
+      "basic": 3400000,
+      "product": 1390600,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     }
+    }
+   ],
+   "totalQuantity": 37,
+   "time1": 24,
+   "time2": 57,
+   "wh": 218804,
+   "dist": 122
+  },
+  {
+   "id": 1149093062,
+   "root": 2765307603,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Смартфон Samsung Galaxy S25 Ultra",
+   "entity": "",
+   "supplier": "Smartphone",
+   "supplierId": 4219779,
+   "supplierRating": 3.5,
+   "pics": 4,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 29,
+   "volume": 10,
+   "weight": 0.501,
+   "promotions": [
+    1052231,
+    1053953
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": []
+    }
+   ],
+   "totalQuantity": 0
+  },
+  {
+   "id": 1472973462,
+   "root": 2765307603,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Смартфон Samsung Galaxy S26 Ultra",
+   "entity": "",
+   "supplier": "Smartphone",
+   "supplierId": 4219779,
+   "supplierRating": 3.5,
+   "pics": 11,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 29,
+   "volume": 10,
+   "weight": 0.501,
+   "promotions": [
+    1052231,
+    1053953
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": []
+    }
+   ],
+   "totalQuantity": 0
+  },
+  {
+   "id": 1650108424,
+   "root": 2765307603,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "subjectId": 515,
+   "subjectParentId": 6258,
+   "name": "Смартфон Samsung Galaxy S26 Ultra",
+   "entity": "",
+   "supplier": "Smartphone",
+   "supplierId": 4219779,
+   "supplierRating": 3.5,
+   "pics": 6,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 29,
+   "volume": 10,
+   "weight": 0.501,
+   "isNew": true,
+   "promotions": [
+    1052231,
+    1053953
+   ],
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "stocks": []
+    }
+   ],
+   "totalQuantity": 0
+  }
+ ]
+}

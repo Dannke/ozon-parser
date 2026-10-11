@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import json
 from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,19 @@ FROM (
 ) s
 WHERE r.run_id = s.run_id
 """
+
+# Сырой ответ сайта по SKU (есть у адаптеров, которые его отдают, - сейчас WB).
+RAW_UPSERT = """
+INSERT INTO raw_products (marketplace, run_id, sku, collected_at, payload)
+VALUES (%(marketplace)s, %(run_id)s, %(sku)s, %(collected_at)s, %(raw)s::jsonb)
+ON CONFLICT (run_id, sku) DO UPDATE SET
+    collected_at = EXCLUDED.collected_at,
+    payload = EXCLUDED.payload
+"""
+
+# Сколько дней хранить сырые ответы: хватит, чтобы заметить ошибку разбора и
+# пересчитать историю, и не раздувает базу.
+RAW_KEEP_DAYS = 90
 
 PRODUCT_FIELDS = (
     "sku",
@@ -515,13 +529,21 @@ class Warehouse:
         return self.run(update)
 
     def start_parse_run(
-        self, kind: str, sku_source: str, total_sku: int, request_delay: float
+        self,
+        kind: str,
+        sku_source: str,
+        total_sku: int,
+        request_delay: float,
+        region: str | None = None,
     ) -> int:
+        """Новый прогон; region - регион сбора (у WB - dest, у Ozon - None, по IP)."""
+
         def insert(cursor) -> int:
             cursor.execute(
-                "INSERT INTO parse_runs (marketplace, kind, sku_source, total_sku, request_delay) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING run_id",
-                (self.marketplace, kind, sku_source, total_sku, request_delay),
+                "INSERT INTO parse_runs "
+                "(marketplace, kind, sku_source, total_sku, request_delay, region) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING run_id",
+                (self.marketplace, kind, sku_source, total_sku, request_delay, region),
             )
             return cursor.fetchone()[0]
 
@@ -561,15 +583,32 @@ class Warehouse:
     def record_product(
         self, run_id: int, product: dict, collected_at: dt.datetime | None = None
     ) -> None:
-        """Сохраняет карточку и наблюдение цены - одной транзакцией."""
+        """Сохраняет карточку, наблюдение цены и сырой ответ (если есть) - одной транзакцией."""
         params = product_params(run_id, product, collected_at or dt.datetime.now(dt.UTC))
         params["marketplace"] = self.marketplace
+        raw = product.get("raw")
+        params["raw"] = json.dumps(raw, ensure_ascii=False) if raw is not None else None
 
         def write(cursor) -> None:
             cursor.execute(PRODUCT_UPSERT, params)
             cursor.execute(PRICE_UPSERT, params)
+            if raw is not None:
+                cursor.execute(RAW_UPSERT, params)
 
         self.run(write)
+
+    def prune_raw(self, keep_days: int = RAW_KEEP_DAYS) -> int:
+        """Удаляет сырые ответы маркетплейса старше keep_days дней. Возвращает число строк."""
+
+        def delete(cursor) -> int:
+            cursor.execute(
+                "DELETE FROM raw_products "
+                "WHERE marketplace = %s AND collected_at < now() - %s * interval '1 day'",
+                (self.marketplace, keep_days),
+            )
+            return cursor.rowcount
+
+        return self.run(delete)
 
     def skus_without_details(self, skus: Iterable[str]) -> set:
         """SKU, у которых ещё нет описания: карточки нет в products или вторая

@@ -34,6 +34,7 @@ SOURCES = (SOURCE_OZON_LISTING, SOURCE_DATA_OZON)
 NAME_RE = re.compile(r"[a-z0-9_]+")
 LISTING_URL_RE = re.compile(r"https://www\.ozon\.ru/category/[a-z0-9\-]+-\d+/?")
 DAILY_AT_RE = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+WB_DEST_RE = re.compile(r"-?\d+")
 
 
 class SettingsError(ValueError):
@@ -102,6 +103,18 @@ class ParserSettings:
 
 
 @dataclass(frozen=True)
+class WildberriesSettings:
+    """marketplaces.wb в config.yaml: сбор Wildberries (docs/configuration.md)."""
+
+    enabled: bool = False
+    # Регион доставки WB (dest): от него зависят наличие, сроки и часть цен.
+    dest: str = ""
+    # Сколько карточек в одном запросе и пауза между запросами, секунды.
+    batch_size: int = 100
+    request_delay: float = 5.0
+
+
+@dataclass(frozen=True)
 class BackupSettings:
     """Резервная копия базы после ежедневного прогона (backup.py)."""
 
@@ -136,6 +149,7 @@ class Settings:
     schedule: ScheduleSettings = field(default_factory=ScheduleSettings)
     benchmark: BenchmarkSettings = field(default_factory=BenchmarkSettings)
     backup: BackupSettings = field(default_factory=BackupSettings)
+    wb: WildberriesSettings = field(default_factory=WildberriesSettings)
     path: Path | None = None
 
     def category(self, name: str) -> CategoryConfig:
@@ -295,6 +309,16 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
     if not match:
         raise SettingsError("schedule.daily_at={!r}: ожидается ЧЧ:ММ".format(daily_at))
 
+    marketplaces = _section(data, "marketplaces")
+    wb = marketplaces.get("wb") or {}
+    if not isinstance(wb, dict):
+        raise SettingsError("Раздел 'marketplaces.wb' должен быть словарём")
+    wb_dest = str(wb.get("dest") or "")
+    if wb_dest and not WB_DEST_RE.fullmatch(wb_dest):
+        raise SettingsError("marketplaces.wb.dest={!r}: ожидается целое число".format(wb_dest))
+    if wb.get("enabled") and not wb_dest:
+        raise SettingsError("marketplaces.wb: включён, но не задан dest (регион доставки)")
+
     price_source = str(parser.get("price_source") or constants.PRICE_SOURCE_API)
     if price_source not in constants.PRICE_SOURCES:
         raise SettingsError(
@@ -327,6 +351,15 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
             details_refresh_days=_int(
                 parser, "details_refresh_days", 1, minimum=0, maximum=365, where="parser."
             ),
+        ),
+        wb=WildberriesSettings(
+            enabled=bool(wb.get("enabled", False)),
+            dest=wb_dest,
+            batch_size=_int(
+                wb, "batch_size", 100, minimum=1, maximum=100, where="marketplaces.wb."
+            ),
+            # Чаще - уже не человеческий темп: у WB свой антибот (разведка 11.10.2026).
+            request_delay=_float(wb, "request_delay", 5.0, minimum=3.0, where="marketplaces.wb."),
         ),
         backup=BackupSettings(
             enabled=bool(backup.get("enabled", False)),
