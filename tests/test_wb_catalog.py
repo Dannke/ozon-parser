@@ -1,9 +1,9 @@
 """Discovery Wildberries без сети: разбор выдачи, источник и обход категории.
 
 Живой wildberries.ru не нужен: WbCatalogSource проверяется на поддельной
-вкладке, которая «делает» запрос выдачи сайта и отвечает на наши запросы по
-сценарию, а общий обход (discover_listing) - на поддельном источнике со
-страницами по 100 товаров.
+вкладке, которая на открытие страницы категории «делает» запрос выдачи
+сайта и отвечает по сценарию, а общий обход (discover_listing) - на
+поддельном источнике со страницами по 100 товаров.
 """
 
 from __future__ import annotations
@@ -45,8 +45,10 @@ SETTINGS_DATA = {
 CATEGORY = parse_settings(SETTINGS_DATA).category("coffee", "wb")
 
 
-def listing(*ids) -> dict:
-    return {"metadata": {}, "total": 2740, "products": [{"id": i, "name": "x"} for i in ids]}
+def listing(*ids) -> str:
+    return json.dumps(
+        {"metadata": {}, "total": 2740, "products": [{"id": i, "name": "x"} for i in ids]}
+    )
 
 
 # ----------------------------------------------------------------- разбор --
@@ -60,11 +62,14 @@ def test_parse_search_takes_ids_in_listing_order():
     assert catalog.parse_search({"products": None}, 1) == []
 
 
-def test_page_url_changes_only_the_page():
-    assert catalog.page_url(SITE_URL, 1) == SITE_URL
-    url = catalog.page_url(SITE_URL, 7)
-    assert "page=7" in url and "xsubject=631;1188" in url and "sort=popular" in url
-    assert "query=menu_v3_9794+x" in url
+def test_page_addresses():
+    """Адрес страницы категории получает page; номер страницы читается из запроса сайта."""
+    assert catalog.category_page_url(PAGE_URL, 1) == PAGE_URL
+    assert catalog.category_page_url(PAGE_URL, 7) == PAGE_URL + "&page=7"
+    plain = "https://www.wildberries.ru/catalog/elektronika/smartfony-i-telefony/vse-smartfony"
+    assert catalog.category_page_url(plain, 3) == plain + "?page=3"
+    assert catalog.listing_page(SITE_URL) == 1
+    assert catalog.listing_page(SITE_URL + "&page=12") == 12
     assert catalog.is_listing_request(SITE_URL)
     assert not catalog.is_listing_request(
         SITE_URL.replace("resultset=catalog", "resultset=filters")
@@ -88,17 +93,11 @@ def test_wb_categories_from_settings():
 
 
 # ------------------------------------------------------------ источник --
-class FakeRequest:
-    def __init__(self, status: int, body: str):
-        self.url = SITE_URL
+class FakeResponse:
+    def __init__(self, url: str, status: int, body: str):
+        self.url = url
         self.status = status
         self.body = body
-
-    def all_headers(self) -> dict:
-        return {"cookie": "c", "user-agent": "ua", "deviceid": "site_1", "x-spa-version": "14"}
-
-    def response(self):
-        return self
 
     def text(self) -> str:
         return self.body
@@ -112,49 +111,49 @@ class FakeContext:
         return [{"name": "x_wbaas_token"}] if self.token else []
 
 
-SITE_ANSWER = (200, json.dumps(listing(1, 2)))
-
-
 class FakePage:
-    """Вкладка WB: на открытие категории «сайт» делает запрос выдачи.
+    """Вкладка WB: на открытие страницы категории «сайт» запрашивает выдачу.
 
-    answers - ответы на наши запросы (fetch) по порядку: (статус, тело) или исключение.
+    answers - по одному на открытие страницы категории: (статус, тело) ответа
+    сайта, None - сайт выдачу не запросил, исключение - goto упал.
+    ignore_page - сайт не понимает page в адресе и всегда грузит первую страницу.
     """
 
-    def __init__(self, site=SITE_ANSWER, answers=(), token=True):
+    def __init__(self, answers=(), token=True, ignore_page=False):
         self.context = FakeContext(token)
-        self.site = site
         self.answers = list(answers)
+        self.ignore_page = ignore_page
         self.handlers: list = []
         self.opened: list = []
-        self.fetched: list = []
 
     def on(self, event, handler):
+        assert event == "response"
         self.handlers.append(handler)
 
     def goto(self, url, **kwargs):
         self.opened.append(url)
-        if url == PAGE_URL and self.site:
-            for handler in self.handlers:
-                handler(FakeRequest(*self.site))
-
-    def wait_for_timeout(self, ms):
-        pass
-
-    def evaluate(self, script, args):
-        url, headers = args
-        self.fetched.append((url, headers))
+        if not url.startswith(PAGE_URL):
+            return  # главная
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
-        status, body = answer
-        return {"status": status, "body": body}
+        if answer is None:
+            return
+        number = 1 if self.ignore_page or "page=" not in url else int(url.split("page=")[1])
+        site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
+        for handler in self.handlers:
+            handler(FakeResponse(site, *answer))
+            handler(FakeResponse(SITE_URL.replace("catalog", "filters"), 200, "{}"))
+
+    def wait_for_timeout(self, ms):
+        pass
 
 
 @pytest.fixture(autouse=True)
 def no_waits(monkeypatch):
     sleeps: list = []
     monkeypatch.setattr(catalog.time, "sleep", sleeps.append)
+    monkeypatch.setattr(catalog, "RESPONSE_WAIT_SECONDS", 0)
     monkeypatch.setattr(config, "MAX_RETRIES", 2)
     return sleeps
 
@@ -165,23 +164,19 @@ def source_for(page: FakePage) -> catalog.WbCatalogSource:
     return source
 
 
-def test_first_page_comes_from_the_sites_own_request():
-    page = FakePage(answers=[(200, json.dumps(listing(3, 4)))])
+def test_pages_are_opened_like_a_visitor_and_read_from_the_sites_answer():
+    """Своих запросов выдачи нет: страница открывается по адресу, ответ - сайта."""
+    page = FakePage(answers=[(200, listing(1, 2)), (200, listing(3, 4))])
     source = source_for(page)
 
-    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL]
     assert [c.sku for c in source.fetch(CATEGORY, 1) or []] == ["1", "2"]
-    assert page.fetched == []  # первую страницу повторно не запрашиваем
-    assert [c.sku for c in source.fetch(CATEGORY, 2) or []] == ["3", "4"]
-    url, headers = page.fetched[0]
-    assert "page=2" in url and "xsubject=631;1188" in url
-    # Заголовки - сайта, без тех, что браузер ставит сам.
-    assert headers == {"deviceid": "site_1", "x-spa-version": "14"}
-    assert source.requests == 2
+    assert [c.sku for c in source.fetch(CATEGORY, 5) or []] == ["3", "4"]
+    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL, PAGE_URL + "&page=5"]
+    assert source.requests == 2 and not source.blocked
 
 
 def test_empty_page_is_the_end_of_listing():
-    source = source_for(FakePage(answers=[(200, json.dumps(listing()))]))
+    source = source_for(FakePage(answers=[(200, listing())]))
     assert source.fetch(CATEGORY, 100) == []
     assert not source.blocked
 
@@ -191,56 +186,37 @@ def test_refusal_stops_the_source_without_retries(status):
     page = FakePage(answers=[(status, "")])
     source = source_for(page)
     assert source.fetch(CATEGORY, 2) is None
-    assert source.blocked and len(page.fetched) == 1
-    assert source.fetch(CATEGORY, 3) is None and len(page.fetched) == 1
+    assert source.blocked and len(page.opened) == 2
+    assert source.fetch(CATEGORY, 3) is None and len(page.opened) == 2
 
 
-def test_refused_site_request_or_browser_check_blocks_before_any_fetch():
-    source = source_for(FakePage(site=(498, "")))
+def test_failed_browser_check_blocks_before_any_page():
+    page = FakePage(token=False)
+    source = source_for(page)
     assert source.blocked and source.fetch(CATEGORY, 1) is None
-    source = source_for(FakePage(token=False))
-    assert source.blocked and source.site is None
+    assert page.opened == ["https://www.wildberries.ru/"]
 
 
-def test_category_page_is_reopened_after_fetches_per_view():
-    """Шестой подряд запрос с одного показа WB отверг - страница открывается заново."""
-    answers = [(200, json.dumps(listing(n))) for n in range(10, 16)]
-    page = FakePage(answers=answers)
+def test_other_page_is_never_taken_for_the_requested_one():
+    """WB проигнорировал page и показал первую: страница пропущена, а не подменена."""
+    page = FakePage(answers=[(200, listing(1))] * 3, ignore_page=True)
     source = source_for(page)
-    for number in range(2, 8):
-        assert source.fetch(CATEGORY, number)
-    # 4 запроса с первого показа, затем показ заново и ещё 2.
-    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL, PAGE_URL]
-    assert len(page.fetched) == 6 and source.requests == 8
-
-
-def test_refusal_on_reopen_stops_the_source():
-    page = FakePage(answers=[(200, json.dumps(listing(n))) for n in range(4)])
-    source = source_for(page)
-    for number in range(2, 6):
-        source.fetch(CATEGORY, number)
-    page.site = (498, "")
-    assert source.fetch(CATEGORY, 6) is None
-    assert source.blocked and len(page.fetched) == 4
-
-
-def test_page_without_listing_request_is_a_failure():
-    with pytest.raises(catalog.SiteRefused, match="выдачу"):
-        source_for(FakePage(site=None))
+    assert source.fetch(CATEGORY, 4) is None
+    assert not source.blocked and len(page.opened) == 1 + 3
 
 
 def test_ordinary_errors_are_retried_then_skipped(no_waits):
-    page = FakePage(
-        answers=[(502, ""), PlaywrightError("net::ERR_RESET"), (200, json.dumps(listing(5)))]
-    )
-    source = source_for(page)
+    page = FakePage(answers=[(502, ""), PlaywrightError("net::ERR_RESET"), None, (200, listing(5))])
+    source = catalog.WbCatalogSource(lambda: cast(Any, page), delay=0.0)
+    source.open(CATEGORY)
+    config.MAX_RETRIES = 3
     assert [c.sku for c in source.fetch(CATEGORY, 2) or []] == ["5"]
-    assert not source.blocked and len(no_waits) == 2
+    assert not source.blocked and len(no_waits) == 3
 
-    broken = FakePage(answers=[(500, "")] * 3)
+    broken = FakePage(answers=[(500, "")] * 4)
     source = source_for(broken)
     assert source.fetch(CATEGORY, 2) is None
-    assert not source.blocked and len(broken.fetched) == 3
+    assert not source.blocked and len(broken.opened) == 1 + 4
 
 
 # --------------------------------------------------------------- обход --

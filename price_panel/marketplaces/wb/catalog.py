@@ -1,20 +1,19 @@
 """Discovery Wildberries: товары категории из выдачи самого сайта.
 
-Выдачу категории WB отдаёт запросом
+Выдачу категории сайт получает запросом
 
     /__internal/u-search/exactmatch/ru/common/v18/search?query=<запрос категории>&page=N
 
-по 100 товаров на страницу. Запрос с чужим query WB отвергает (498,
-разведка 11.10.2026), поэтому источник:
+по 100 товаров на страницу. Наши собственные запросы выдачи WB терпит
+недолго: с чужим query - сразу 498, с тем же query и другой page - около
+шести за сессию, дальше 498, и повторный показ страницы этого не меняет
+(discovery 11.10.2026, 18:39 и 19:25). Поэтому источник своих запросов
+выдачи не делает вовсе - он листает сайт, как человек:
 
   1. проходит проверку браузера на главной (как адаптер карточек);
-  2. открывает страницу категории из config.yaml - фильтры (xsubject) прямо
-     в её адресе - и запоминает запрос выдачи, который сделал сам сайт, и
-     его ответ: это первая страница, повторно её не запрашиваем;
-  3. дальше меняет в этом запросе только page, с паузой между запросами;
-  4. после FETCHES_PER_VIEW своих запросов открывает страницу категории
-     заново: шестой подряд запрос с одного показа страницы WB отверг (498,
-     discovery 11.10.2026, 18:40).
+  2. открывает страницу категории из config.yaml (фильтры, xsubject, - в её
+     адресе) с page=N и берёт ответ на запрос выдачи, который сделал сам
+     сайт для этой страницы; между страницами - пауза request_delay.
 
 Выдача кончается раньше 100-й страницы (сотая - уже пустая): пустая
 страница - конец. Отказ WB (403 / 429 / 498) - стоп без повторов: капчу и
@@ -39,21 +38,16 @@ from price_panel.infra.logger import get_logger
 from price_panel.marketplaces.wb.adapter import (
     BLOCK_STATUSES,
     CARD_URL,
-    FETCH_JS,
+    SITE_REQUEST_WAIT_SECONDS,
     SiteRefused,
-    SiteRequest,
-    own_headers,
     pass_browser_check,
-    wait_site_request,
 )
 
 log = get_logger("discovery")
 
 SEARCH_PATH = "/__internal/u-search/"
 PAGE_SIZE = 100
-# ponytail: порог - по одному прогону (5 запросов прошли, 6-й - 498); если 498
-# вернётся, уменьшить или поднять marketplaces.wb.request_delay.
-FETCHES_PER_VIEW = 4
+RESPONSE_WAIT_SECONDS = SITE_REQUEST_WAIT_SECONDS
 
 
 class Category(Protocol):
@@ -70,13 +64,20 @@ def is_listing_request(url: str) -> bool:
     return SEARCH_PATH in url and "resultset=catalog" in url
 
 
-def page_url(site_url: str, page: int) -> str:
-    """Запрос выдачи сайта с другой страницей; первая - как у сайта, без page."""
+def listing_page(url: str) -> int:
+    """Номер страницы в запросе выдачи сайта: без page - первая."""
+    query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+    try:
+        return int(query.get("page") or 1)
+    except ValueError:
+        return 0
+
+
+def category_page_url(url: str, page: int) -> str:
+    """Адрес страницы категории с нужной страницей выдачи; первая - как в config.yaml."""
     if page == 1:
-        return site_url
-    parts = urllib.parse.urlsplit(site_url)
-    query = dict(urllib.parse.parse_qsl(parts.query), page=str(page))
-    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query, safe=";")))
+        return url
+    return "{}{}page={}".format(url, "&" if "?" in url else "?", page)
 
 
 def parse_search(body: dict, page: int) -> list:
@@ -102,28 +103,18 @@ class WbCatalogSource:
 
     page_size = PAGE_SIZE
 
-    def __init__(
-        self,
-        new_page: Callable[[], Page],
-        delay: float,
-        jitter: float = 0.0,
-        fetches_per_view: int = FETCHES_PER_VIEW,
-    ):
+    def __init__(self, new_page: Callable[[], Page], delay: float, jitter: float = 0.0):
         self.new_page = new_page
         self.delay = delay
         self.jitter = jitter
-        self.fetches_per_view = fetches_per_view
         self.requests = 0
         self.blocked = False
         self.page: Page | None = None
-        self.site: SiteRequest | None = None
-        self.first: list | None = None
-        self._seen: list = []
-        self._view_fetches = 0
+        self._responses: list = []
         self._last_done = 0.0
 
     def _pause(self) -> None:
-        """Пауза от конца предыдущего запроса, со случайным разбросом."""
+        """Пауза от конца предыдущей страницы, со случайным разбросом."""
         target = self.delay * random.uniform(1 - self.jitter, 1 + self.jitter)
         wait = target - (time.monotonic() - self._last_done)
         if wait > 0:
@@ -138,81 +129,59 @@ class WbCatalogSource:
         )
 
     def open(self, category: Category) -> None:
-        """Открывает категорию и берёт запрос выдачи, который сделал сам сайт.
-
-        :raises SiteRefused: сайт не запросил выдачу (не та страница, сменилась вёрстка).
-        """
+        """Новая сессия: проверка браузера WB и слежение за ответами выдачи сайта."""
         page = self.page = self.new_page()
         page.on(
-            "request",
-            lambda request: self._seen.append(request) if is_listing_request(request.url) else None,
+            "response",
+            lambda response: (
+                self._responses.append(response) if is_listing_request(response.url) else None
+            ),
         )
         try:
             pass_browser_check(page)
         except SiteRefused as exc:
             self._refused(category, str(exc))
-            return
-        self.first = self._view(page, category)
 
-    def _view(self, page: Page, category: Category) -> list | None:
-        """Показ страницы категории: запрос выдачи сайта и его ответ (первая страница).
+    def _site_response(self, page: Page, number: int):
+        """Ответ сайта на запрос выдачи страницы number, если он был."""
+        deadline = time.monotonic() + RESPONSE_WAIT_SECONDS
+        while True:
+            for response in self._responses:
+                if listing_page(response.url) == number:
+                    return response
+            if time.monotonic() >= deadline:
+                return None
+            page.wait_for_timeout(500)
 
-        :raises SiteRefused: сайт не запросил выдачу.
-        """
-        self._seen.clear()
+    def _view(self, page: Page, category: Category, number: int) -> tuple:
+        """Открывает страницу выдачи: (HTTP-статус ответа сайта, тело) или (0, причина)."""
+        self._responses.clear()
         self._pause()
-        log.info("%s: открываю %s", category.name, category.url)
+        log.info("%s: открываю страницу выдачи %s", category.name, number)
         try:
-            page.goto(category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-            wait_site_request(page, self._seen)
+            page.goto(
+                category_page_url(category.url, number),
+                wait_until="domcontentloaded",
+                timeout=config.PAGE_TIMEOUT,
+            )
+            response = self._site_response(page, number)
+            if response is None:
+                # Не та страница (WB проигнорировал page) за нужную не выдаётся.
+                return 0, "сайт не запросил выдачу страницы {}".format(number)
+            return response.status, response.text() if response.status == 200 else ""
+        except PlaywrightError as exc:
+            return 0, str(exc).splitlines()[0]
         finally:
             self._last_done = time.monotonic()
-        if not self._seen:
-            raise SiteRefused("{}: страница не запросила выдачу".format(category.name))
-        request = self._seen[0]
-        self.site = SiteRequest(url=request.url, headers=own_headers(request.all_headers()))
-        self.requests += 1
-        self._view_fetches = 0
-        response = request.response()
-        if response is None:
-            return None
-        if response.status in BLOCK_STATUSES:
-            self._refused(category, "HTTP {} на запрос самого сайта".format(response.status))
-            return None
-        try:
-            body = json.loads(response.text()) if response.status == 200 else None
-        except (json.JSONDecodeError, PlaywrightError):
-            body = None
-        return parse_search(body, 1) if isinstance(body, dict) else None
 
     def fetch(self, category: Category, page_number: int) -> list | None:
         """Товары одной страницы выдачи; [] - выдача кончилась; None - не получили."""
-        if self.blocked or self.site is None or self.page is None:
+        if self.blocked or self.page is None:
             return None
-        if page_number == 1 and self.first is not None:
-            return self.first
         errors = 0
         while True:
-            if self._view_fetches >= self.fetches_per_view:
-                try:
-                    self._view(self.page, category)
-                except (SiteRefused, PlaywrightError) as exc:
-                    # Не открылась заново - дальше не дёргаем: сбой похож на отказ.
-                    self._refused(category, str(exc).splitlines()[0])
-                if self.blocked:
-                    return None
-            self._pause()
             self.requests += 1
-            self._view_fetches += 1
-            try:
-                result = self.page.evaluate(
-                    FETCH_JS, [page_url(self.site.url, page_number), self.site.headers]
-                )
-                status, body = result["status"], result["body"]
-            except PlaywrightError as exc:
-                status, body = 0, str(exc).splitlines()[0]
-            finally:
-                self._last_done = time.monotonic()
+            status, body = self._view(self.page, category, page_number)
             if status in BLOCK_STATUSES:
                 self._refused(category, "HTTP {}, страница {}".format(status, page_number))
                 return None
