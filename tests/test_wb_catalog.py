@@ -202,6 +202,28 @@ def test_refused_site_request_or_browser_check_blocks_before_any_fetch():
     assert source.blocked and source.site is None
 
 
+def test_category_page_is_reopened_after_fetches_per_view():
+    """Шестой подряд запрос с одного показа WB отверг - страница открывается заново."""
+    answers = [(200, json.dumps(listing(n))) for n in range(10, 16)]
+    page = FakePage(answers=answers)
+    source = source_for(page)
+    for number in range(2, 8):
+        assert source.fetch(CATEGORY, number)
+    # 4 запроса с первого показа, затем показ заново и ещё 2.
+    assert page.opened == ["https://www.wildberries.ru/", PAGE_URL, PAGE_URL]
+    assert len(page.fetched) == 6 and source.requests == 8
+
+
+def test_refusal_on_reopen_stops_the_source():
+    page = FakePage(answers=[(200, json.dumps(listing(n))) for n in range(4)])
+    source = source_for(page)
+    for number in range(2, 6):
+        source.fetch(CATEGORY, number)
+    page.site = (498, "")
+    assert source.fetch(CATEGORY, 6) is None
+    assert source.blocked and len(page.fetched) == 4
+
+
 def test_page_without_listing_request_is_a_failure():
     with pytest.raises(catalog.SiteRefused, match="выдачу"):
         source_for(FakePage(site=None))

@@ -11,7 +11,10 @@
   2. открывает страницу категории из config.yaml - фильтры (xsubject) прямо
      в её адресе - и запоминает запрос выдачи, который сделал сам сайт, и
      его ответ: это первая страница, повторно её не запрашиваем;
-  3. дальше меняет в этом запросе только page, с паузой между запросами.
+  3. дальше меняет в этом запросе только page, с паузой между запросами;
+  4. после FETCHES_PER_VIEW своих запросов открывает страницу категории
+     заново: шестой подряд запрос с одного показа страницы WB отверг (498,
+     discovery 11.10.2026, 18:40).
 
 Выдача кончается раньше 100-й страницы (сотая - уже пустая): пустая
 страница - конец. Отказ WB (403 / 429 / 498) - стоп без повторов: капчу и
@@ -48,6 +51,9 @@ log = get_logger("discovery")
 
 SEARCH_PATH = "/__internal/u-search/"
 PAGE_SIZE = 100
+# ponytail: порог - по одному прогону (5 запросов прошли, 6-й - 498); если 498
+# вернётся, уменьшить или поднять marketplaces.wb.request_delay.
+FETCHES_PER_VIEW = 4
 
 
 class Category(Protocol):
@@ -96,15 +102,24 @@ class WbCatalogSource:
 
     page_size = PAGE_SIZE
 
-    def __init__(self, new_page: Callable[[], Page], delay: float, jitter: float = 0.0):
+    def __init__(
+        self,
+        new_page: Callable[[], Page],
+        delay: float,
+        jitter: float = 0.0,
+        fetches_per_view: int = FETCHES_PER_VIEW,
+    ):
         self.new_page = new_page
         self.delay = delay
         self.jitter = jitter
+        self.fetches_per_view = fetches_per_view
         self.requests = 0
         self.blocked = False
         self.page: Page | None = None
         self.site: SiteRequest | None = None
         self.first: list | None = None
+        self._seen: list = []
+        self._view_fetches = 0
         self._last_done = 0.0
 
     def _pause(self) -> None:
@@ -128,40 +143,47 @@ class WbCatalogSource:
         :raises SiteRefused: сайт не запросил выдачу (не та страница, сменилась вёрстка).
         """
         page = self.page = self.new_page()
-        seen: list = []
         page.on(
             "request",
-            lambda request: seen.append(request) if is_listing_request(request.url) else None,
+            lambda request: self._seen.append(request) if is_listing_request(request.url) else None,
         )
         try:
             pass_browser_check(page)
         except SiteRefused as exc:
             self._refused(category, str(exc))
             return
+        self.first = self._view(page, category)
+
+    def _view(self, page: Page, category: Category) -> list | None:
+        """Показ страницы категории: запрос выдачи сайта и его ответ (первая страница).
+
+        :raises SiteRefused: сайт не запросил выдачу.
+        """
+        self._seen.clear()
         self._pause()
         log.info("%s: открываю %s", category.name, category.url)
         try:
             page.goto(category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-            wait_site_request(page, seen)
+            wait_site_request(page, self._seen)
         finally:
             self._last_done = time.monotonic()
-        if not seen:
+        if not self._seen:
             raise SiteRefused("{}: страница не запросила выдачу".format(category.name))
-        request = seen[0]
+        request = self._seen[0]
         self.site = SiteRequest(url=request.url, headers=own_headers(request.all_headers()))
         self.requests += 1
+        self._view_fetches = 0
         response = request.response()
         if response is None:
-            return
+            return None
         if response.status in BLOCK_STATUSES:
             self._refused(category, "HTTP {} на запрос самого сайта".format(response.status))
-            return
+            return None
         try:
             body = json.loads(response.text()) if response.status == 200 else None
         except (json.JSONDecodeError, PlaywrightError):
             body = None
-        if isinstance(body, dict):
-            self.first = parse_search(body, 1)
+        return parse_search(body, 1) if isinstance(body, dict) else None
 
     def fetch(self, category: Category, page_number: int) -> list | None:
         """Товары одной страницы выдачи; [] - выдача кончилась; None - не получили."""
@@ -171,8 +193,17 @@ class WbCatalogSource:
             return self.first
         errors = 0
         while True:
+            if self._view_fetches >= self.fetches_per_view:
+                try:
+                    self._view(self.page, category)
+                except (SiteRefused, PlaywrightError) as exc:
+                    # Не открылась заново - дальше не дёргаем: сбой похож на отказ.
+                    self._refused(category, str(exc).splitlines()[0])
+                if self.blocked:
+                    return None
             self._pause()
             self.requests += 1
+            self._view_fetches += 1
             try:
                 result = self.page.evaluate(
                     FETCH_JS, [page_url(self.site.url, page_number), self.site.headers]
