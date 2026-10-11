@@ -172,6 +172,26 @@ def test_refusal_is_antibot_for_the_whole_batch_without_retries(status):
     assert len(site.urls) == 1
 
 
+def test_token_refresh_lets_the_site_renew_and_retries_the_batch():
+    """498 - сайт обновляет токен на открытой карточке, батч повторяется."""
+    site = FakeSite((498, ""), answer("1343721205"))
+    refreshes: list = []
+    (outcome,) = adapter().batches(["1343721205"], SITE, site, lambda: refreshes.append(1) or True)
+    assert outcome.product is not None and refreshes == [1] and len(site.urls) == 2
+
+
+def test_token_refresh_that_does_not_help_is_antibot():
+    site = FakeSite((498, ""))
+    refreshes: list = []
+    (outcome,) = adapter().batches(["1"], SITE, site, lambda: refreshes.append(1) or True)
+    assert outcome.error_type == "antibot" and len(refreshes) == wb.TOKEN_REFRESHES
+    assert len(site.urls) == 1 + wb.TOKEN_REFRESHES
+    # Карточка не открылась - повторять батч незачем.
+    site = FakeSite((498, ""))
+    (outcome,) = adapter().batches(["1"], SITE, site, lambda: False)
+    assert outcome.error_type == "antibot" and len(site.urls) == 1
+
+
 def test_server_errors_are_retried_then_reported(monkeypatch):
     monkeypatch.setattr(config, "MAX_RETRIES", 2)
     site = FakeSite(

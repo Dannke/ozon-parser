@@ -43,6 +43,8 @@ from price_panel.marketplaces.wb.adapter import (
     BLOCK_STATUSES,
     CARD_URL,
     SITE_REQUEST_WAIT_SECONDS,
+    TOKEN_REFRESH,
+    TOKEN_REFRESHES,
     SiteRefused,
     pass_browser_check,
 )
@@ -57,9 +59,6 @@ RESPONSE_WAIT_SECONDS = SITE_REQUEST_WAIT_SECONDS
 SCROLL_STEP_PX = 400
 SCROLL_PAUSE_MS = 400
 SCROLL_SECONDS = 30
-TOKEN_REFRESH = 498
-# Сколько раз подряд на одну страницу сайт может получить 498 и обновить токен.
-TOKEN_REFRESHES = 2
 
 
 class Category(Protocol):
