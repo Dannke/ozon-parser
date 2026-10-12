@@ -188,7 +188,7 @@ Discovery и сбор Wildberries: `python -m price_panel discover / parse
 
 | Ключ                  | Сейчас    | Назначение |
 | --------------------- | --------- | ---------- |
-| `enabled`             | `false`   | Разрешить discovery и сбор WB. Без него `discover` / `parse --marketplace wb` — ошибка настроек (код 1). Включать, когда ozon-market-analytics различает маркетплейсы: иначе строки WB в боевой базе смешаются с Ozon. Если раздела нет — `false` |
+| `enabled`             | `true`    | Разрешить discovery и сбор WB: ежедневный прогон собирает WB параллельно с Ozon. Без него `discover` / `parse --marketplace wb` — ошибка настроек (код 1). Если раздела нет — `false`. Включён 12.10.2026; ozon-market-analytics пока смешивает строки WB с Ozon ([limitations.md](limitations.md#данные)) |
 | `dest`                | `-365341` | Регион доставки WB (целое число): Новосибирск, ПВЗ «Чаплыгина 16». От него зависят наличие и сроки; пишется в `parse_runs.region`. Обязателен при `enabled: true` |
 | `batch_size`          | `100`     | Карточек в одном запросе, 1..100 |
 | `request_delay`       | `8`       | Пауза между обращениями к WB — запросами карточек и страницами выдачи в discovery, с (не меньше 3, по умолчанию 5); разброс — `discovery.request_jitter` у выдачи, до 30 % у карточек |
