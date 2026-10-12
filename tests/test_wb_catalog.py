@@ -121,7 +121,8 @@ class FakePage:
     answers - что сайт отдаёт: первое - на открытие страницы категории,
     дальше - по одному на шаг прокрутки. Ответ - (статус, тело) следующей
     страницы или (статус, тело, номер), список таких - несколько ответов
-    сразу, None - сайт ничего не запросил.
+    сразу, None - сайт ничего не запросил. (статус, тело, номер, "later") -
+    сайт ответит чуть позже сам, без новых действий (повтор после 498).
     """
 
     def __init__(self, answers=(), token=True):
@@ -132,6 +133,7 @@ class FakePage:
         self.opened: list = []
         self.wheels = 0
         self.next_page = 1
+        self.later: list = []
 
     def on(self, event, handler):
         assert event == "response"
@@ -140,13 +142,19 @@ class FakePage:
     def answer(self) -> None:
         answer = self.answers.pop(0) if self.answers else None
         for item in [answer] if isinstance(answer, tuple) else answer or []:
-            status, body, number = (*item, self.next_page) if len(item) == 2 else item
-            if status == 200:
-                self.next_page = number + 1
-            site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
-            for handler in self.handlers:
-                handler(FakeResponse(site, status, body))
-                handler(FakeResponse(SITE_URL.replace("catalog", "filters"), 200, "{}"))
+            if len(item) == 4:
+                self.later.append([2, item[:3]])  # через одно ожидание
+                continue
+            self.emit(item)
+
+    def emit(self, item) -> None:
+        status, body, number = (*item, self.next_page) if len(item) == 2 else item
+        if status == 200:
+            self.next_page = number + 1
+        site = SITE_URL + ("&page={}".format(number) if number > 1 else "")
+        for handler in self.handlers:
+            handler(FakeResponse(site, status, body))
+            handler(FakeResponse(SITE_URL.replace("catalog", "filters"), 200, "{}"))
 
     def goto(self, url, **kwargs):
         self.opened.append(url)
@@ -154,7 +162,11 @@ class FakePage:
             self.answer()
 
     def wait_for_timeout(self, ms):
-        pass
+        for entry in list(self.later):
+            entry[0] -= 1
+            if entry[0] <= 0:
+                self.later.remove(entry)
+                self.emit(entry[1])
 
 
 @pytest.fixture(autouse=True)
@@ -163,6 +175,7 @@ def no_waits(monkeypatch):
     monkeypatch.setattr(catalog.time, "sleep", sleeps.append)
     monkeypatch.setattr(catalog, "RESPONSE_WAIT_SECONDS", 0)
     monkeypatch.setattr(catalog, "SCROLL_SECONDS", 0)
+    monkeypatch.setattr(catalog, "TOKEN_RECOVERY_SECONDS", 0.05)
     monkeypatch.setattr(config, "MAX_RETRIES", 2)
     return sleeps
 
@@ -204,26 +217,26 @@ def test_empty_page_is_the_end_of_listing():
     assert not source.blocked
 
 
-def test_token_refresh_is_waited_for_not_a_refusal():
-    """498 - сайт сам обновляет токен и повторяет запрос; источник ждёт ответ."""
+def test_token_refresh_is_waited_for_without_scrolling():
+    """498 - сайт сам обновляет токен и повторяет запрос; источник ждёт и не крутит."""
     page = FakePage(
         answers=[
-            [(498, "", 1), (200, listing(1), 1)],
-            [(498, "", 2), (200, listing(2), 2)],
-            [(498, "", 3)],
-            (200, listing(3), 3),
+            [(498, "", 1), (200, listing(1), 1, "later")],
+            [(498, "", 2), (200, listing(2), 2, "later")],
+            [(498, "", 3), (200, listing(3), 3, "later")],
         ]
     )
     source = source_for(page)
     assert [c.sku for c in source.fetch(CATEGORY, 3) or []] == ["3"]
-    assert not source.blocked and page.wheels == 3
+    # По одной прокрутке на страницу: пока сайт обновлял токен, не крутили.
+    assert not source.blocked and page.wheels == 2
 
 
 def test_token_refresh_that_never_recovers_stops_the_source():
-    page = FakePage(answers=[(200, listing(1)), (498, "", 2), (498, "", 2), (498, "", 2)])
+    page = FakePage(answers=[(200, listing(1)), (498, "", 2)])
     source = source_for(page)
     assert source.fetch(CATEGORY, 2) is None
-    assert source.blocked and page.wheels == 3
+    assert source.blocked and page.wheels == 1
 
 
 @pytest.mark.parametrize("status", [403, 429])
