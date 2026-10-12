@@ -410,3 +410,22 @@ def test_raw_answer_is_stored_with_the_observation_and_pruned(wh, wb):
     assert wb.prune_raw() == 1
     assert [row[1] for row in wb.run(raw)] == ["2"]
     assert wb.history_counts() == (2, 2, 1)  # история цен остаётся
+
+
+def test_price_jumps_compare_with_the_previous_day(wh, wb):
+    """Скачок цены больше чем на 50 % к прошлому дню - по маркетплейсу хранилища."""
+    day1 = dt.datetime(2026, 10, 11, 9, 0, tzinfo=dt.UTC)
+    day2 = day1 + dt.timedelta(days=1)
+    first = wh.start_parse_run("daily", "panel", 3, 3.0)
+    for sku in ("1", "2", "3"):
+        wh.record_product(first, PRODUCT | {"sku": sku, "price": 100.0}, day1)
+    second = wh.start_parse_run("daily", "panel", 3, 3.0)
+    for sku, price in (("1", 300.0), ("2", 105.0), ("3", 40.0)):
+        wh.record_product(second, PRODUCT | {"sku": sku, "price": price}, day2)
+    # Новый SKU без прошлой цены не сравнивается.
+    wh.record_product(second, PRODUCT | {"sku": "4", "price": 999.0}, day2)
+
+    since = day2 - dt.timedelta(hours=1)
+    assert wh.price_jumps(since) == (2, 3)  # +200 % и -60 %
+    assert wh.price_jumps(since, percent=250) == (0, 3)
+    assert wb.price_jumps(since) == (0, 0)

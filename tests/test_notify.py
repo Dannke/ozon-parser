@@ -421,3 +421,49 @@ def test_notify_command_delivers_queued_messages(monkeypatch, capsys, configured
         "✅ Price panel: оповещения настроены, бот на связи",
     ]
     assert not outbox.exists()
+
+
+# ------------------------------------------------- несколько маркетплейсов --
+def test_problems_are_listed_per_marketplace():
+    assert notify.job_problems(0, None, {"Ozon": 0, "WB": 0}) == []
+    assert notify.job_problems(3, True, {"Ozon": 0, "WB": 3}) == [
+        "WB остановил прогон (капча или отказы подряд)"
+    ]
+    assert notify.job_problems(1, False, {"Ozon": 1, "WB": 0}) == [
+        "Ozon: прогон не удался",
+        "резервная копия базы не создана",
+    ]
+
+
+def test_one_failed_marketplace_fails_the_pulse(configured):
+    opener = Recorder()
+    notify.report_job(3, True, opener=opener, market_codes={"Ozon": 0, "WB": 3})
+    assert opener.requests[0].full_url == "https://hc-ping.com/uuid/fail"
+    assert sent_text(opener.requests[1]).startswith(
+        "❌ Price panel: WB остановил прогон (капча или отказы подряд)"
+    )
+
+
+def test_retry_names_the_marketplace(configured):
+    opener = Recorder()
+    notify.report_retry("16:00 MSK", 1, 1, opener=opener, market="WB")
+    assert sent_text(opener.requests[0]).startswith("⚠️ Price panel: WB остановил прогон")
+
+
+def test_parallel_senders_do_not_lose_queued_messages(configured):
+    """Два потока планировщика пишут в очередь одновременно - ничего не теряется."""
+    import threading
+
+    opener = Recorder(fail_with=urllib.error.URLError("network is down"))
+
+    def send(prefix):
+        for n in range(5):
+            notify.send_telegram("{} {}".format(prefix, n), opener=opener)
+
+    threads = [threading.Thread(target=send, args=(name,)) for name in ("Ozon", "WB")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    texts = sorted(entry["text"] for entry in notify.load_outbox())
+    assert texts == sorted("{} {}".format(p, n) for p in ("Ozon", "WB") for n in range(5))

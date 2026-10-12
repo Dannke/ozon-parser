@@ -641,6 +641,26 @@ class Warehouse:
 
         self.run(insert)
 
+    def price_jumps(self, since: dt.datetime, percent: float = 50) -> tuple:
+        """(SKU, чья цена изменилась больше чем на percent %, SKU с прошлой ценой) с since.
+
+        Сравнение - с предыдущим днём наблюдения (v_price_daily). В обычный день
+        таких скачков у Ozon 0,1-0,9 % SKU (02-12.10.2026); почти все - признак
+        сломанного разбора цены, а не рынка.
+        """
+
+        def query(cursor) -> tuple:
+            cursor.execute(
+                "SELECT count(*) FILTER (WHERE abs(price_change_pct) > %s), count(*) "
+                "FROM v_price_daily WHERE marketplace = %s AND collected_at >= %s "
+                "AND price IS NOT NULL AND prev_price > 0",
+                (percent, self.marketplace, since),
+            )
+            row = cursor.fetchone()
+            return int(row[0]), int(row[1])
+
+        return self.run(query)
+
     def error_counts(self, run_id: int) -> list:
         """Ошибки прогона по типам: [(error_type, число)], самые частые первыми."""
 

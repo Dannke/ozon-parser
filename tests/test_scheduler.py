@@ -6,6 +6,7 @@ import datetime as dt
 import socket
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -224,7 +225,7 @@ def recorded_reports(monkeypatch) -> list:
     monkeypatch.setattr(
         scheduler.notify,
         "report_job",
-        lambda code, backup_ok, summary=None: reports.append((code, backup_ok)),
+        lambda code, backup_ok, summary=None, market_codes=None: reports.append((code, backup_ok)),
     )
     return reports
 
@@ -293,14 +294,14 @@ def test_job_reports_start_retry_and_result(monkeypatch):
     monkeypatch.setattr(
         scheduler.notify,
         "report_retry",
-        lambda retry_at, attempt, attempts, details: events.append(
+        lambda retry_at, attempt, attempts, details, market="": events.append(
             ("retry", retry_at, attempt, attempts)
         ),
     )
     monkeypatch.setattr(
         scheduler.notify,
         "report_job",
-        lambda code, backup_ok, summary: events.append(("result", code)),
+        lambda code, backup_ok, summary, market_codes=None: events.append(("result", code)),
     )
 
     assert scheduler.run_job(settings(ensure_session=False), clock=clock, sleep=clock.sleep) == 0
@@ -327,7 +328,7 @@ def test_run_summary_text():
 def test_summaries_are_empty_without_database(monkeypatch):
     """Оповещение уходит и без подробностей, если база не отвечает."""
 
-    def broken():
+    def broken(**kwargs):
         raise DatabaseError("Ошибка PostgreSQL: connection refused")
 
     monkeypatch.setattr(scheduler, "Warehouse", broken)
@@ -362,8 +363,9 @@ def test_container_loop_does_not_report_on_restart(monkeypatch):
 class SummaryWarehouse:
     """Warehouse для сводки итога: panel из 3 SKU, прогоны новые - первыми."""
 
-    def __init__(self, runs):
+    def __init__(self, runs, jumps=(0, 3)):
         self.runs = runs
+        self.jumps = jumps
 
     def __enter__(self):
         return self
@@ -383,6 +385,9 @@ class SummaryWarehouse:
     def error_counts(self, run_id):
         return [("timeout", 1)] if run_id == 7 else []
 
+    def price_jumps(self, since, percent):
+        return self.jumps
+
 
 def run_row(run_id, kind, started):
     return (run_id, kind, "partial", started, 3, 2, 1, 600.0, 9.0, 6.6, 3.0)
@@ -391,7 +396,7 @@ def run_row(run_id, kind, started):
 def test_summary_reports_todays_daily_run_not_a_later_manual_one(monkeypatch):
     now = dt.datetime.now(dt.UTC)
     runs = [run_row(8, "benchmark", now), run_row(7, "daily", now)]
-    monkeypatch.setattr(scheduler, "Warehouse", lambda: SummaryWarehouse(runs))
+    monkeypatch.setattr(scheduler, "Warehouse", lambda **kw: SummaryWarehouse(runs))
     summary = scheduler.job_summary(settings())
     assert summary.splitlines()[0] == "За сегодня собрано 2 из 3 SKU panel"
     assert "Прогон 7 (daily)" in summary and "Ошибки: timeout 1" in summary
@@ -402,6 +407,124 @@ def test_summary_skips_yesterdays_run(monkeypatch):
     """Сегодня собирать было нечего - вчерашний прогон за итог не выдаётся."""
     yesterday = dt.datetime.now(dt.UTC) - dt.timedelta(days=2)
     monkeypatch.setattr(
-        scheduler, "Warehouse", lambda: SummaryWarehouse([run_row(7, "daily", yesterday)])
+        scheduler, "Warehouse", lambda **kw: SummaryWarehouse([run_row(7, "daily", yesterday)])
     )
     assert scheduler.job_summary(settings()) == "За сегодня собрано 2 из 3 SKU panel"
+
+
+# ------------------------------------------------- несколько маркетплейсов --
+WB_ON = {"wb": {"enabled": True, "dest": "-365341"}}
+
+
+def with_wb(**schedule):
+    data = dict(BASE, schedule=dict({"daily_at": "05:30"}, **schedule), marketplaces=WB_ON)
+    return parse_settings(data)
+
+
+def test_wb_steps_have_no_session_and_name_the_marketplace():
+    assert scheduler.enabled_marketplaces(settings()) == ["ozon"]
+    assert scheduler.enabled_marketplaces(with_wb()) == ["ozon", "wb"]
+    steps = scheduler.job_commands(with_wb(), "wb")
+    assert [name for name, _ in steps] == ["parse"]
+    assert steps[0][1][3:] == ["parse", "--marketplace", "wb", "--kind", "daily", "--missing-today"]
+
+
+def market_of(command) -> str:
+    return "wb" if "--marketplace" in command else "ozon"
+
+
+def test_marketplaces_run_in_parallel_with_their_own_retries(monkeypatch):
+    """WB остановлен блокировкой и повторён; Ozon - один раз; копия и итог - один раз."""
+    clock = FakeClock()
+    codes = {"ozon": [0], "wb": [EXIT_BLOCKED, 0], "backup": [0]}
+    calls: list = []
+    started = threading.Barrier(2, timeout=10)
+
+    def fake_run(command, **kwargs):
+        step = "backup" if command[3] == "backup" else market_of(command)
+        calls.append(step)
+        if step != "backup" and calls.count(step) == 1:
+            started.wait()  # оба маркетплейса стартовали, не дожидаясь друг друга
+        return subprocess.CompletedProcess(command, codes[step].pop(0))
+
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+    events: list = []
+    monkeypatch.setattr(scheduler.notify, "report_start", lambda details: events.append("start"))
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_retry",
+        lambda retry_at, attempt, attempts, details, market="": events.append(("retry", market)),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_job",
+        lambda code, backup_ok, summary, market_codes=None: events.append(
+            ("result", code, backup_ok, market_codes)
+        ),
+    )
+    data = dict(
+        BASE, schedule={"ensure_session": False}, marketplaces=WB_ON, backup={"enabled": True}
+    )
+    code = scheduler.run_job(parse_settings(data), clock=clock, sleep=clock.sleep)
+
+    assert code == 0
+    assert sorted(calls) == ["backup", "ozon", "wb", "wb"] and calls[-1] == "backup"
+    assert events == [
+        "start",
+        ("retry", "WB"),
+        ("result", 0, True, {"Ozon": 0, "WB": 0}),
+    ]
+
+
+def test_crash_of_one_marketplace_keeps_backup_and_report(monkeypatch):
+    def fake_run(command, **kwargs):
+        if market_of(command) == "wb" and command[3] != "backup":
+            raise RuntimeError("программная ошибка")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+    reports: list = []
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_job",
+        lambda code, backup_ok, summary, market_codes=None: reports.append((code, market_codes)),
+    )
+    data = dict(BASE, schedule={"ensure_session": False}, marketplaces=WB_ON)
+    assert scheduler.run_job(parse_settings(data)) == 1
+    assert reports == [(1, {"Ozon": 0, "WB": 1})]
+
+
+def test_summary_per_marketplace_and_price_anomaly(monkeypatch):
+    """Разделы [Ozon] и [WB]; у WB скачок цен у 40 % SKU - предупреждение."""
+    now = dt.datetime.now(dt.UTC)
+
+    def warehouse(marketplace="ozon"):
+        if marketplace == "wb":
+            return SummaryWarehouse([run_row(9, "daily", now)], jumps=(40, 100))
+        return SummaryWarehouse([run_row(7, "daily", now)], jumps=(1, 1100))
+
+    monkeypatch.setattr(scheduler, "Warehouse", warehouse)
+    summary = scheduler.job_summary(with_wb(), ["ozon", "wb"])
+    ozon, wb = summary.split("[WB]")
+    assert ozon.startswith("[Ozon]\nЗа сегодня собрано 2 из 3 SKU panel")
+    assert "Прогон 7 (daily)" in ozon and "⚠️" not in ozon
+    assert "Прогон 9 (daily)" in wb
+    assert "⚠️ Цена изменилась больше чем на 50 % у 40 из 100 SKU (40 %)" in wb
+    # Мало сравнимых SKU - не аномалия, а начало истории.
+    monkeypatch.setattr(scheduler, "Warehouse", lambda **kw: SummaryWarehouse([], jumps=(5, 5)))
+    assert "⚠️" not in scheduler.job_summary(settings())
+
+
+def test_start_details_point_to_wb_discover(monkeypatch):
+    class Empty(SummaryWarehouse):
+        def active_panel_skus(self):
+            return set()
+
+    monkeypatch.setattr(scheduler, "Warehouse", lambda marketplace="ozon": Empty([]))
+    text = scheduler.start_details(with_wb(), ["ozon", "wb"])
+    assert text.splitlines() == [
+        "[Ozon]",
+        "Panel пуста - нужен python -m price_panel discover",
+        "[WB]",
+        "Panel пуста - нужен python -m price_panel discover --marketplace wb",
+    ]
