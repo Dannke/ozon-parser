@@ -99,7 +99,7 @@
 | `price_panel/__main__.py` | CLI конвейера: `python -m price_panel <команда>` |
 | `price_panel/app/pipeline.py` | Прогон парсера с учётом в `parse_runs`, benchmark |
 | `price_panel/app/discovery.py` | Discovery: листинг ozon.ru и data.ozon.ru, общий обход top + хвост (и для WB), отбор в panel |
-| `price_panel/app/scheduler.py` | Ежедневный прогон: `schedule --once` и цикл для контейнера |
+| `price_panel/app/scheduler.py` | Ежедневный прогон: `schedule --once` и цикл для контейнера; конвейер на каждый включённый маркетплейс в своём потоке, копия базы и итог — один раз |
 | `price_panel/app/settings.py` | Чтение и проверка `config.yaml` |
 | `price_panel/marketplaces/ozon/parse.py` | Разбор карточки (API, HTML), повторы SKU; `OzonAdapter`: браузер, прогрев, перезапуски, темп |
 | `price_panel/marketplaces/ozon/extract.py` | Разбор JSON карточки (из API и из HTML) в поля — без сети |

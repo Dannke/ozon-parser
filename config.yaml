@@ -168,10 +168,11 @@ benchmark:
 
 marketplaces:
   wb:
-    # Сбор Wildberries (python -m price_panel discover / parse --marketplace wb).
-    # Выключен, пока ozon-market-analytics не различает маркетплейсы: иначе
-    # строки WB в боевой базе смешались бы с Ozon.
-    enabled: false
+    # Сбор Wildberries (python -m price_panel discover / parse --marketplace wb):
+    # ежедневный прогон собирает WB параллельно с Ozon. Включён 12.10.2026;
+    # ozon-market-analytics пока не различает маркетплейсы и смешивает строки
+    # WB с Ozon - её нужно поправить отдельно (docs/limitations.md).
+    enabled: true
     # Регион доставки (dest) - Новосибирск, ПВЗ «Чаплыгина 16»: от него зависят
     # наличие и сроки. Найден разведкой 11.10.2026 (docs/verification-log.md).
     dest: "-365341"

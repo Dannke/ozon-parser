@@ -14,10 +14,18 @@ schedule.block_retries раз, и об этом уходит отдельное 
 schedule.parse_timeout_hours. Резервная копия базы (если backup.enabled) и
 оповещение об итоге (notify.py) - один раз, после всех повторов.
 
+Шаги идут на каждый включённый маркетплейс (Ozon всегда, WB - при
+marketplaces.wb.enabled), у каждого свой конвейер в своём потоке и свои
+повторы после блокировки: Ozon собирает часами, WB - минутами, и один не ждёт
+другого. Общий у них только предел schedule.parse_timeout_hours; копия базы
+и итог - один раз, когда закончат все. Пока маркетплейс один, всё идёт без
+потоков, а оповещения - без разбивки.
+
 Каждый шаг - отдельный процесс. Браузер и драйвер Playwright умирают вместе
 с процессом прогона, так что утечка памяти или зависший Chromium не
-накапливаются от ночи к ночи, а сам планировщик остаётся лёгким. Прогоны идут
-строго по очереди: следующий не начнётся, пока не закончился предыдущий.
+накапливаются от ночи к ночи, а сам планировщик остаётся лёгким. Прогоны
+одного маркетплейса идут строго по очереди: следующий не начнётся, пока не
+закончился предыдущий.
 
 Airflow DAG (dags/ozon_parser_dag.py) остаётся рабочим вариантом для тех, у
 кого Airflow уже есть; оба способа вызывают одни и те же команды.
@@ -30,12 +38,13 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from price_panel.app.pipeline import format_duration
 from price_panel.app.settings import Settings
-from price_panel.core.models import EXIT_BLOCKED
+from price_panel.core.models import EXIT_BLOCKED, OZON, WB
 from price_panel.infra import backup, config, notify
 from price_panel.infra.logger import get_logger
 from price_panel.infra.warehouse import Warehouse
@@ -66,6 +75,15 @@ NETWORK_HOST = "www.ozon.ru"
 NETWORK_WAIT_SECONDS = 30 * 60
 NETWORK_POLL_SECONDS = 60
 
+MARKET_TITLES = {OZON: "Ozon", WB: "WB"}
+
+# Аномалия дня: у больше чем JUMP_SHARE SKU цена изменилась больше чем на
+# JUMP_PERCENT % к прошлому дню. В обычный день у Ozon таких 0,1-0,9 % SKU
+# (02-12.10.2026), при сломанном разборе (копейки, не то поле) - почти все.
+JUMP_PERCENT = 50
+JUMP_SHARE = 0.10
+JUMP_MIN_COMPARED = 20
+
 
 def get_timezone(name: str) -> dt.tzinfo:
     """Часовой пояс по имени; если базы поясов нет - UTC с предупреждением."""
@@ -92,11 +110,17 @@ def day_start(now: dt.datetime, tz: dt.tzinfo) -> dt.datetime:
     return dt.datetime.combine(now.astimezone(tz).date(), dt.time(0), tzinfo=tz)
 
 
-def job_commands(settings: Settings) -> list:
-    """Шаги ежедневного прогона: (название, команда)."""
+def enabled_marketplaces(settings: Settings) -> list:
+    """Маркетплейсы ежедневного прогона: Ozon всегда, WB - при marketplaces.wb.enabled."""
+    return [OZON] + ([WB] if settings.wb.enabled else [])
+
+
+def job_commands(settings: Settings, marketplace: str = OZON) -> list:
+    """Шаги ежедневного прогона маркетплейса: (название, команда)."""
     python = sys.executable
     steps = []
-    if settings.schedule.ensure_session:
+    # Сессия - только у Ozon (cookies.json); WB собирается гостем.
+    if marketplace == OZON and settings.schedule.ensure_session:
         steps.append(
             (
                 "ensure_session",
@@ -109,9 +133,10 @@ def job_commands(settings: Settings) -> list:
                 ],
             )
         )
-    steps.append(
-        ("parse", [python, "-m", "price_panel", "parse", "--kind", "daily", "--missing-today"])
-    )
+    parse = [python, "-m", "price_panel", "parse"]
+    if marketplace != OZON:
+        parse += ["--marketplace", marketplace]
+    steps.append(("parse", parse + ["--kind", "daily", "--missing-today"]))
     return steps
 
 
@@ -144,10 +169,10 @@ def _run_step(name: str, command: list, timeout: float, limit: Callable[[], str]
     return code
 
 
-def _run_steps(settings: Settings, deadline: float, clock) -> int:
-    """Шаги прогона по очереди. Возвращает код возврата шага parse."""
+def _run_steps(settings: Settings, deadline: float, clock, marketplace: str = OZON) -> int:
+    """Шаги прогона маркетплейса по очереди. Возвращает код возврата шага parse."""
     code = 1
-    for name, command in job_commands(settings):
+    for name, command in job_commands(settings, marketplace):
         code = _run_step(
             name,
             command,
@@ -190,31 +215,36 @@ def wait_for_network(clock=time.time, sleep=time.sleep) -> bool:
             sleep(NETWORK_POLL_SECONDS)
 
 
-def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
-    """Один ежедневный прогон с повторами после блокировки, копией базы и оповещениями.
+def run_market(
+    settings: Settings,
+    marketplace: str,
+    deadline: float,
+    label: str = "",
+    clock=time.time,
+    sleep=time.sleep,
+) -> int:
+    """Прогон одного маркетплейса с повторами после блокировки. Код последнего parse.
 
-    Возвращает код возврата последнего шага parse: ни копия, ни оповещения
-    его не меняют.
+    :param label: название маркетплейса для оповещений; пусто - он единственный.
     """
     schedule = settings.schedule
-    # Ожидание сети входит в общий предел прогона: задача Windows его не превысит.
-    deadline = clock() + schedule.parse_timeout_hours * 3600
-    wait_for_network(clock, sleep)
-    notify.report_start(details=lambda: start_details(settings))
-    code = _run_steps(settings, deadline, clock)
+    title = MARKET_TITLES[marketplace]
+    code = _run_steps(settings, deadline, clock, marketplace)
     for attempt in range(1, schedule.block_retries + 1):
         if code != EXIT_BLOCKED:
             break
         retry_at = clock() + schedule.block_retry_delay_hours * 3600
         if deadline - retry_at < MIN_RETRY_WINDOW_SECONDS:
             log.warning(
-                "Прогон остановлен блокировкой Ozon; на повтор не хватает времени "
+                "%s остановил прогон; на повтор не хватает времени "
                 "(schedule.parse_timeout_hours=%s) - SKU доберёт следующий прогон",
+                title,
                 schedule.parse_timeout_hours,
             )
             break
         log.warning(
-            "Прогон остановлен блокировкой Ozon - повтор %s из %s в %s",
+            "%s остановил прогон - повтор %s из %s в %s",
+            title,
             attempt,
             schedule.block_retries,
             _clock_time(retry_at, settings),
@@ -223,14 +253,55 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
             _clock_time(retry_at, settings),
             attempt,
             schedule.block_retries,
-            details=lambda: day_progress(settings),
+            details=lambda: day_progress(settings, marketplace),
+            market=label,
         )
         _sleep_until(retry_at, clock, sleep)
-        code = _run_steps(settings, deadline, clock)
+        code = _run_steps(settings, deadline, clock, marketplace)
+    return code
+
+
+def _guarded_market(settings: Settings, marketplace: str, deadline: float, clock, sleep) -> int:
+    """run_market в потоке: сбой одного маркетплейса не лишает остальных копии и итога."""
+    title = MARKET_TITLES[marketplace]
+    try:
+        return run_market(settings, marketplace, deadline, title, clock, sleep)
+    except Exception:  # noqa: BLE001 - иначе пропали бы копия базы и итог дня
+        log.exception("Прогон %s упал в планировщике", title)
+        return 1
+
+
+def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
+    """Один ежедневный прогон всех маркетплейсов с повторами, копией базы и оповещениями.
+
+    Возвращает первый ненулевой код parse (Ozon - первым) или 0: ни копия, ни
+    оповещения его не меняют.
+    """
+    # Ожидание сети входит в общий предел прогона: задача Windows его не превысит.
+    deadline = clock() + settings.schedule.parse_timeout_hours * 3600
+    wait_for_network(clock, sleep)
+    markets = enabled_marketplaces(settings)
+    notify.report_start(details=lambda: start_details(settings, markets))
+    if len(markets) == 1:
+        codes = {OZON: run_market(settings, OZON, deadline, clock=clock, sleep=sleep)}
+    else:
+        with ThreadPoolExecutor(len(markets), thread_name_prefix="market") as pool:
+            futures = {
+                market: pool.submit(_guarded_market, settings, market, deadline, clock, sleep)
+                for market in markets
+            }
+        codes = {market: future.result() for market, future in futures.items()}
+    code = next((value for value in codes.values() if value != 0), 0)
 
     # Копия снимается и после неудачного прогона: собранное за день уже в базе.
     backup_ok = _run_backup() if settings.backup.enabled else None
-    notify.report_job(code, backup_ok, summary=lambda: job_summary(settings))
+    many = len(markets) > 1
+    notify.report_job(
+        code,
+        backup_ok,
+        summary=lambda: job_summary(settings, markets),
+        market_codes={MARKET_TITLES[m]: value for m, value in codes.items()} if many else None,
+    )
     return code
 
 
@@ -270,16 +341,40 @@ def format_run(row: tuple, error_counts: list) -> str:
     return text
 
 
-def _read_db(settings: Settings, read: Callable[[Warehouse, dt.datetime], str]) -> str:
-    """Текст для оповещения из базы; пусто, если база недоступна."""
+def format_jumps(jumped: int, compared: int) -> str:
+    return (
+        "⚠️ Цена изменилась больше чем на {} % у {} из {} SKU ({:.0f} %) - "
+        "похоже на сбой разбора цен".format(JUMP_PERCENT, jumped, compared, 100 * jumped / compared)
+    )
+
+
+def _read_db(
+    settings: Settings, read: Callable[[Warehouse, dt.datetime], str], marketplace: str = OZON
+) -> str:
+    """Текст для оповещения из базы маркетплейса; пусто, если база недоступна."""
     tz = get_timezone(settings.schedule.timezone)
     since = day_start(dt.datetime.now(dt.UTC), tz)
     try:
-        with Warehouse() as wh:
+        with Warehouse(marketplace=marketplace) as wh:
             return read(wh, since)
     except Exception as exc:  # noqa: BLE001 - оповещение не должно падать из-за базы
         log.debug("Данные для оповещения не прочитаны: %s", exc)
         return ""
+
+
+def _per_market(
+    settings: Settings,
+    markets: Sequence[str],
+    read_for: Callable[[str], Callable[[Warehouse, dt.datetime], str]],
+) -> str:
+    """Текст по каждому маркетплейсу; при нескольких - с заголовком [Ozon], [WB]."""
+    if len(markets) == 1:
+        return _read_db(settings, read_for(markets[0]), markets[0])
+    parts = []
+    for market in markets:
+        text = _read_db(settings, read_for(market), market)
+        parts.append("[{}]{}".format(MARKET_TITLES[market], "\n" + text if text else ""))
+    return "\n".join(parts)
 
 
 def _progress(wh: Warehouse, since: dt.datetime) -> str:
@@ -287,28 +382,34 @@ def _progress(wh: Warehouse, since: dt.datetime) -> str:
     return format_progress(total, len(wh.panel_skus(missing_since=since))) if total else ""
 
 
-def start_details(settings: Settings) -> str:
+def start_details(settings: Settings, markets: Sequence[str] = (OZON,)) -> str:
     """Для оповещения о начале: сколько SKU panel осталось собрать за день."""
 
-    def read(wh: Warehouse, since: dt.datetime) -> str:
-        total = len(wh.active_panel_skus())
-        if not total:
-            return "Panel пуста - нужен python -m price_panel discover"
-        missing = len(wh.panel_skus(missing_since=since))
-        if not missing:
-            return "Все {} SKU panel за сегодня уже собраны".format(total)
-        return "К сбору {} из {} SKU panel".format(missing, total)
+    def read_for(market: str):
+        def read(wh: Warehouse, since: dt.datetime) -> str:
+            total = len(wh.active_panel_skus())
+            if not total:
+                return "Panel пуста - нужен python -m price_panel discover{}".format(
+                    "" if market == OZON else " --marketplace " + market
+                )
+            missing = len(wh.panel_skus(missing_since=since))
+            if not missing:
+                return "Все {} SKU panel за сегодня уже собраны".format(total)
+            return "К сбору {} из {} SKU panel".format(missing, total)
 
-    return _read_db(settings, read)
+        return read
+
+    return _per_market(settings, markets, read_for)
 
 
-def day_progress(settings: Settings) -> str:
-    """Для оповещения о повторе: сколько SKU уже собрано за день."""
-    return _read_db(settings, _progress)
+def day_progress(settings: Settings, marketplace: str = OZON) -> str:
+    """Для оповещения о повторе: сколько SKU маркетплейса уже собрано за день."""
+    return _read_db(settings, _progress, marketplace)
 
 
-def job_summary(settings: Settings) -> str:
-    """Для оповещения об итоге: собрано за день, последний ежедневный прогон, его ошибки.
+def job_summary(settings: Settings, markets: Sequence[str] = (OZON,)) -> str:
+    """Для оповещения об итоге: собрано за день, последний ежедневный прогон, его
+    ошибки и аномалия цен - по каждому маркетплейсу.
 
     Берётся только сегодняшний прогон с kind=daily: ручной parse или benchmark
     после него - не итог задачи, а если parse сегодня собирать было нечего,
@@ -324,9 +425,12 @@ def job_summary(settings: Settings) -> str:
         ]
         if daily:
             lines.append(format_run(daily[0], wh.error_counts(daily[0][0])))
+        jumped, compared = wh.price_jumps(since, JUMP_PERCENT)
+        if compared >= JUMP_MIN_COMPARED and jumped > compared * JUMP_SHARE:
+            lines.append(format_jumps(jumped, compared))
         return "\n".join(line for line in lines if line)
 
-    return _read_db(settings, read)
+    return _per_market(settings, markets, lambda market: read)
 
 
 def serve(settings: Settings, once: bool = False, clock=time.time) -> int:

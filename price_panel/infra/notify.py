@@ -3,8 +3,9 @@
 Telegram получает сообщение на каждом этапе ежедневного сбора:
 
     начало   - сколько SKU panel осталось собрать за день;
-    повтор   - Ozon остановил прогон капчей, когда будет повтор;
+    повтор   - маркетплейс остановил прогон капчей, когда будет повтор;
     итог     - сколько собрано за день, итог прогона, ошибки по типам, копия базы;
+               при нескольких маркетплейсах - по каждому;
     сбой     - сбор не начался: база недоступна, сломан config.yaml.
 
 Сообщение, которое не ушло из-за сети, не теряется: оно ждёт в очереди
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -65,9 +67,10 @@ FINAL_RETRY_DELAYS = (60, 180, 600, 900)
 SENT, RETRY, REJECTED = "sent", "retry", "rejected"
 
 # Что значат коды выхода шага parse (см. docs/cli.md, «Коды возврата»).
+BLOCKED_MEANING = "{} остановил прогон (капча или отказы подряд)"
 EXIT_MEANINGS = {
     1: "прогон не удался",
-    EXIT_BLOCKED: "Ozon остановил прогон (капча или отказы подряд)",
+    EXIT_BLOCKED: BLOCKED_MEANING.format("Ozon"),
 }
 
 # Пароль в DSN (postgresql://user:пароль@host, password=пароль): текст ошибки
@@ -81,6 +84,9 @@ Details = Callable[[], str]
 
 # Часы для очереди; тесты подменяют.
 _clock: Callable[[], float] = time.time
+
+# Очередь - один файл, а пишут в неё потоки планировщика (по маркетплейсу).
+_OUTBOX_LOCK = threading.Lock()
 
 
 def _no_details() -> str:
@@ -239,6 +245,13 @@ def send_telegram(
     text = redact(text)
     if len(text) > MAX_MESSAGE_CHARS:
         text = text[: MAX_MESSAGE_CHARS - 1] + "…"
+    with _OUTBOX_LOCK:
+        return _send_queued(text, opener, retry_delays, sleep, queue)
+
+
+def _send_queued(
+    text: str, opener: Callable, retry_delays: Sequence[float], sleep: Callable, queue: bool
+) -> bool:
     entry = {"created": _clock(), "text": text}
     pending = load_outbox() + [entry]
     if queue:
@@ -302,16 +315,22 @@ def ping(ok: bool, opener: Callable = urllib.request.urlopen) -> bool:
     return _request(request, opener) == SENT
 
 
-def job_problems(parse_code: int, backup_ok: bool | None) -> list:
+def _exit_meaning(code: int, market: str = "") -> str:
+    if market and code == EXIT_BLOCKED:
+        return BLOCKED_MEANING.format(market)
+    meaning = EXIT_MEANINGS.get(code, "шаг parse завершился с кодом {}".format(code))
+    return "{}: {}".format(market, meaning) if market else meaning
+
+
+def job_problems(parse_code: int, backup_ok: bool | None, market_codes: dict | None = None) -> list:
     """Что пошло не так в ежедневном прогоне; пустой список - всё в порядке.
 
     :param backup_ok: None - копия не снималась (выключена в config.yaml).
+    :param market_codes: {маркетплейс: код parse}, если их несколько; тогда
+        неудача каждого - отдельной строкой, а parse_code не смотрится.
     """
-    problems = []
-    if parse_code != 0:
-        problems.append(
-            EXIT_MEANINGS.get(parse_code, "шаг parse завершился с кодом {}".format(parse_code))
-        )
+    codes = market_codes or {"": parse_code}
+    problems = [_exit_meaning(code, market) for market, code in codes.items() if code != 0]
     if backup_ok is False:
         problems.append("резервная копия базы не создана")
     return problems
@@ -332,11 +351,12 @@ def report_retry(
     attempts: int,
     details: Details = _no_details,
     opener: Callable = urllib.request.urlopen,
+    market: str = "",
 ) -> None:
-    """Ozon остановил прогон, повтор по недостающим SKU назначен на retry_at."""
+    """Маркетплейс (по умолчанию Ozon) остановил прогон, повтор по недостающим SKU в retry_at."""
     _send(
         "⚠️ {}: {}. Повтор {} из {} в {} - только несобранные SKU".format(
-            TITLE, EXIT_MEANINGS[EXIT_BLOCKED], attempt, attempts, retry_at
+            TITLE, BLOCKED_MEANING.format(market or "Ozon"), attempt, attempts, retry_at
         ),
         details,
         opener=opener,
@@ -349,12 +369,16 @@ def report_job(
     summary: Details = _no_details,
     opener: Callable = urllib.request.urlopen,
     sleep: Callable = time.sleep,
+    market_codes: dict | None = None,
 ) -> None:
     """Итог ежедневного прогона: пульс и сообщение в Telegram.
 
+    Пульс - /fail, если не удался хоть один маркетплейс.
+
     :param summary: итог дня из базы; вызывается, только если сообщение уходит.
+    :param market_codes: коды parse по маркетплейсам (см. job_problems).
     """
-    problems = job_problems(parse_code, backup_ok)
+    problems = job_problems(parse_code, backup_ok, market_codes)
     ping(not problems, opener)
     if problems:
         _send(

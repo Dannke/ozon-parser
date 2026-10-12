@@ -17,9 +17,11 @@
      страницы запоминает - хвост выбирается из них.
 
 498 на запрос выдачи - плановая смена токена: JS самого сайта получает новый
-(create-token) и через секунду повторяет запрос, источник просто ждёт. Если
-сайт не восстановился за TOKEN_REFRESHES раз или ответил 403 / 429 - стоп
-без повторов: капчу и проверки источник не решает, найденное сохраняется.
+(create-token) и через секунду повторяет запрос. Источник на это время
+перестаёт прокручивать (новая прокрутка - новый запрос со старым токеном, ещё
+один 498: 12.10.2026, 16:04) и ждёт ответа сайта до TOKEN_RECOVERY_SECONDS.
+Не дождался или сайт ответил 403 / 429 - стоп без повторов: капчу и проверки
+источник не решает, найденное сохраняется.
 Пустая страница - конец выдачи; если прокрутка несколько раз подряд не
 загрузила ничего, глубже источник тоже не идёт.
 """
@@ -44,7 +46,6 @@ from price_panel.marketplaces.wb.adapter import (
     CARD_URL,
     SITE_REQUEST_WAIT_SECONDS,
     TOKEN_REFRESH,
-    TOKEN_REFRESHES,
     SiteRefused,
     pass_browser_check,
 )
@@ -59,6 +60,9 @@ RESPONSE_WAIT_SECONDS = SITE_REQUEST_WAIT_SECONDS
 SCROLL_STEP_PX = 400
 SCROLL_PAUSE_MS = 400
 SCROLL_SECONDS = 30
+# Сколько ждать, пока сайт после 498 сам повторит запрос с новым токеном
+# (вживую - около секунды, 11.10.2026, 20:27).
+TOKEN_RECOVERY_SECONDS = 30
 
 
 class Category(Protocol):
@@ -122,7 +126,8 @@ class WbCatalogSource:
         self.pages: dict = {}
         # Первая страница, на которой выдача кончилась (или дальше не прокрутить).
         self.end: int | None = None
-        self._refreshes: dict = {}
+        # Страница, на которую сайт получил 498 и ещё не получил ответа с новым токеном.
+        self._refreshing: int | None = None
         self._responses: list = []
         self._last_done = 0.0
 
@@ -155,14 +160,9 @@ class WbCatalogSource:
             number = listing_page(response.url)
             if response.status == TOKEN_REFRESH and number not in self.pages:
                 # Сайт сам обновит токен и повторит запрос - ждём его ответа.
-                self._refreshes[number] = self._refreshes.get(number, 0) + 1
-                log.info("%s: страница %s: WB обновляет токен (498)", category.name, number)
-                if self._refreshes[number] > TOKEN_REFRESHES:
-                    self._refused(
-                        category,
-                        "498 {} раза подряд, страница {}".format(self._refreshes[number], number),
-                    )
-                    return
+                if self._refreshing != number:
+                    log.info("%s: страница %s: WB обновляет токен (498)", category.name, number)
+                self._refreshing = number
                 continue
             if response.status in BLOCK_STATUSES:
                 self._refused(category, "HTTP {}, страница {}".format(response.status, number))
@@ -181,8 +181,25 @@ class WbCatalogSource:
                 continue
             self.pages[number] = parse_search(body, number)
             log.info("%s: сайт загрузил страницу выдачи %s", category.name, number)
+            if self._refreshing == number:
+                self._refreshing = None
             if not self.pages[number]:
                 self.end = number if self.end is None else min(self.end, number)
+
+    def _wait_recovery(self, page: Page, category: Category) -> None:
+        """После 498 ничего не трогает и ждёт, пока сайт повторит запрос с новым токеном."""
+        number = self._refreshing
+        deadline = time.monotonic() + TOKEN_RECOVERY_SECONDS
+        while self._refreshing is not None and not self.blocked:
+            page.wait_for_timeout(500)
+            self._collect(category)
+            if self._refreshing is not None and time.monotonic() >= deadline:
+                self._refused(
+                    category,
+                    "498, сайт не обновил токен за {} с, страница {}".format(
+                        TOKEN_RECOVERY_SECONDS, number
+                    ),
+                )
 
     def open(self, category: Category) -> None:
         """Новая сессия: проверка браузера WB и страница категории (первая страница выдачи).
@@ -205,12 +222,10 @@ class WbCatalogSource:
         log.info("%s: открываю %s", category.name, category.url)
         try:
             page.goto(category.url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-            # После 498 сайт повторит запрос сам - ответ на повтор ждём так же.
-            for _ in range(TOKEN_REFRESHES + 1):
-                self._wait_responses(page)
-                self._collect(category)
-                if self.blocked or 1 in self.pages:
-                    break
+            self._wait_responses(page)
+            self._collect(category)
+            if self._refreshing is not None:
+                self._wait_recovery(page, category)
         finally:
             self._last_done = time.monotonic()
         if not self.blocked and 1 not in self.pages:
@@ -256,5 +271,7 @@ class WbCatalogSource:
             except PlaywrightError as exc:
                 log.warning("%s: прокрутка не удалась: %s", category.name, str(exc).splitlines()[0])
             self._collect(category)
+            if self._refreshing is not None:
+                self._wait_recovery(self.page, category)
             stalls = stalls + 1 if len(self.pages) == loaded else 0
         return self.pages[page_number]
