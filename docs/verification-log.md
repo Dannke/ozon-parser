@@ -19,7 +19,7 @@
   задача запускала `powershell.exe -WindowStyle Hidden`, а консоли здесь
   открывает Windows Terminal (Windows 11 26H2, «пусть решает Windows»), и он
   окно не прячет — оно висело весь прогон.
-- **18:16 — исправление и догон.** Действие задачи заменено на
+- **18:38 — исправление и догон.** Действие задачи заменено на
   `conhost.exe --headless powershell.exe …`, задача запущена вручную: дерево
   `conhost --headless → powershell → python schedule → parse ozon / parse wb`,
   ни у одного процесса нет окна, Windows Terminal не запускался.
