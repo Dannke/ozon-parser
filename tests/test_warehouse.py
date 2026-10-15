@@ -265,16 +265,22 @@ def test_parse_queue_starts_with_least_recently_attempted(wh):
 
 def test_parse_queue_can_skip_skus_collected_since(wh):
     """Повтор после блокировки добирает только то, чего за день ещё нет."""
-    wh.add_to_panel(picks("a", "b", "c"), "phones", "ozon_listing", None)
-    run_id = wh.start_parse_run("daily", "panel", 3, 3.0)
+    wh.add_to_panel(picks("a", "b", "c", "d"), "phones", "ozon_listing", None)
+    run_id = wh.start_parse_run("daily", "panel", 4, 3.0)
     today = dt.datetime(2026, 10, 5, 6, 0, tzinfo=dt.UTC)
     wh.record_product(run_id, dict(PRODUCT, sku="a"), today)  # сегодня
     wh.record_product(run_id, dict(PRODUCT, sku="b"), today - dt.timedelta(days=1))  # вчера
     wh.record_error(run_id, "c", "antibot", "антибот-проверка не прошла", 1)  # ошибка
+    # Сайт сегодня ответил, что карточки нет: в догон не берём, но и собранной не считаем.
+    wh.record_error(run_id, "d", "not_found", "WB не вернул карточку", 1)
     midnight = dt.datetime(2026, 10, 4, 21, 0, tzinfo=dt.UTC)  # 00:00 МСК
     assert set(wh.panel_skus(missing_since=midnight)) == {"b", "c"}
     assert set(wh.panel_skus(["phones"], missing_since=midnight)) == {"b", "c"}
-    assert len(wh.panel_skus()) == 3
+    assert len(wh.panel_skus()) == 4
+    assert wh.collected_since(midnight) == 1
+    # На следующий день исчезнувшая карточка снова в очереди: один заход в день.
+    tomorrow = dt.datetime.now(dt.UTC) + dt.timedelta(days=1)
+    assert "d" in wh.panel_skus(missing_since=tomorrow)
 
 
 def test_first_connection_failure_is_not_retried(monkeypatch):

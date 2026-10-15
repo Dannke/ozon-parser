@@ -130,6 +130,11 @@ LEFT JOIN (
     WHERE marketplace = %s AND error_type NOT IN ('not_processed', 'interrupted', 'blocked')
     GROUP BY sku
 ) err ON err.sku = sp.sku
+LEFT JOIN (
+    SELECT sku, max(occurred_at) AS at FROM parse_errors
+    WHERE marketplace = %s AND error_type = 'not_found'
+    GROUP BY sku
+) gone ON gone.sku = sp.sku
 {where}
 ORDER BY greatest(ok.at, err.at) ASC NULLS FIRST, md5(sp.sku)
 """
@@ -352,18 +357,21 @@ class Warehouse:
         При равенстве порядок - md5(sku): стабильный и перемешанный между
         категориями, так что недобор распределяется по ним равномерно.
 
-        missing_since - только SKU без успешного наблюдения с этого момента:
-        повтор после блокировки добирает недостающее, а не обходит panel заново.
+        missing_since - только SKU, которые с этого момента ещё нужно собрать:
+        без успешного наблюдения и без ответа сайта «такой карточки нет»
+        (not_found). Повтор после блокировки добирает недостающее, а не обходит
+        panel заново и не спрашивает снова про исчезнувшие карточки: 15.10.2026
+        вечерний догон WB из одних таких SKU (0 из 15) выглядел неудачным.
         """
         where = "WHERE sp.marketplace = %s AND sp.is_active"
-        params: list = [self.marketplace, self.marketplace, self.marketplace]
+        params: list = [self.marketplace] * 4
         names = list(categories or [])
         if names:
             where += " AND sp.category = ANY(%s)"
             params.append(names)
         if missing_since is not None:
-            where += " AND (ok.at IS NULL OR ok.at < %s)"
-            params.append(missing_since)
+            where += " AND (ok.at IS NULL OR ok.at < %s) AND (gone.at IS NULL OR gone.at < %s)"
+            params += [missing_since, missing_since]
         sql = PANEL_QUEUE.format(where=where)
         if limit is not None:
             sql += " LIMIT %s"
@@ -372,6 +380,20 @@ class Warehouse:
         def query(cursor) -> list:
             cursor.execute(sql, params)
             return [row[0] for row in cursor.fetchall()]
+
+        return self.run(query)
+
+    def collected_since(self, since: dt.datetime) -> int:
+        """Сколько активных SKU panel собрано (есть наблюдение цены) с since."""
+
+        def query(cursor) -> int:
+            cursor.execute(
+                "SELECT count(DISTINCT sp.sku) FROM sku_panel sp JOIN price_history ph "
+                "ON ph.marketplace = sp.marketplace AND ph.sku = sp.sku "
+                "WHERE sp.marketplace = %s AND sp.is_active AND ph.collected_at >= %s",
+                (self.marketplace, since),
+            )
+            return int(cursor.fetchone()[0])
 
         return self.run(query)
 

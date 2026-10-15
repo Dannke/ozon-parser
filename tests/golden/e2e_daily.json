@@ -1,19 +1,13 @@
 {
   "exit_codes": [
     0,
-    1
+    0
   ],
   "parse_errors": [
     {
       "attempts": 1,
       "error_type": "not_found",
       "run_id": 1,
-      "sku": "404404"
-    },
-    {
-      "attempts": 1,
-      "error_type": "not_found",
-      "run_id": 2,
       "sku": "404404"
     }
   ],
@@ -28,17 +22,6 @@
       "status": "partial",
       "success_count": 2,
       "total_sku": 3
-    },
-    {
-      "error_count": 1,
-      "kind": "daily",
-      "processed_count": 1,
-      "request_delay": "0.00",
-      "run_id": 2,
-      "sku_source": "panel",
-      "status": "failed",
-      "success_count": 0,
-      "total_sku": 1
     }
   ],
   "price_history": [
