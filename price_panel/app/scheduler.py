@@ -379,7 +379,7 @@ def _per_market(
 
 def _progress(wh: Warehouse, since: dt.datetime) -> str:
     total = len(wh.active_panel_skus())
-    return format_progress(total, len(wh.panel_skus(missing_since=since))) if total else ""
+    return format_progress(total, total - wh.collected_since(since)) if total else ""
 
 
 def start_details(settings: Settings, markets: Sequence[str] = (OZON,)) -> str:
@@ -394,7 +394,7 @@ def start_details(settings: Settings, markets: Sequence[str] = (OZON,)) -> str:
                 )
             missing = len(wh.panel_skus(missing_since=since))
             if not missing:
-                return "Все {} SKU panel за сегодня уже собраны".format(total)
+                return "За сегодня собирать больше нечего ({} SKU panel)".format(total)
             return "К сбору {} из {} SKU panel".format(missing, total)
 
         return read
