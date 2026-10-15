@@ -43,8 +43,11 @@ $localTime, $configTime, $configZone = $parts[0], $parts[1], $parts[2]
 $limitMinutes = [int]$parts[3]
 
 $script = Join-Path $root "scripts\run_daily.ps1"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`"" `
+# conhost --headless: у прогона есть консоль, но нет окна. -WindowStyle Hidden
+# окно не прячет, когда консоли открывает Windows Terminal (так по умолчанию в
+# Windows 11), и закрытое окно обрывало прогон кодом 0xC000013A (15.10.2026).
+$action = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`"" `
     -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Daily -At $localTime
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
