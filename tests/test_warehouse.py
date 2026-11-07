@@ -412,6 +412,46 @@ def test_raw_answer_is_stored_with_the_observation_and_pruned(wh, wb):
     assert wb.history_counts() == (2, 2, 1)  # история цен остаётся
 
 
+def test_list_price_is_stored_and_backfilled_from_raw(wh, wb):
+    """0006: list_price пишется с наблюдением, а старые строки WB заполняются из
+    raw_products - basic самого дешёвого размера; кривой ответ не ломает миграцию."""
+    at = dt.datetime(2026, 10, 20, tzinfo=dt.UTC)
+    run_id = wb.start_parse_run("daily", "panel", 5, 8.0, region="-365341")
+    sizes = [
+        {"price": None},
+        {"price": {"product": 150000, "basic": 300000}},
+        {"price": {"product": 90000, "basic": 90000}},  # цена дошла до зачёркнутой
+    ]
+    raws = {
+        "1": {"sizes": sizes},
+        "2": {"sizes": [{"price": {"product": 90000}}]},  # basic нет
+        "3": {"sizes": "сломано"},
+        "4": {"sizes": [{"price": {"product": 90000, "basic": "много"}}]},
+    }
+    for sku, raw in raws.items():
+        wb.record_product(run_id, PRODUCT | {"sku": sku, "raw": raw}, at)
+    wb.record_product(run_id, PRODUCT | {"sku": "5", "list_price": 2000.0}, at)
+    wh.record_product(wh.start_parse_run("daily", "panel", 1, 3.0), PRODUCT | {"sku": "1"}, at)
+
+    def list_prices(cursor):
+        cursor.execute("SELECT marketplace, sku, list_price FROM price_history ORDER BY 1, 2")
+        return [(m, sku, float(v) if v is not None else None) for m, sku, v in cursor.fetchall()]
+
+    assert ("wb", "5", 2000.0) in wb.run(list_prices)
+    # Схема до 0006: колонки нет, строки уже собраны - применяем миграцию заново.
+    migration = next(p for p in warehouse.migration_files() if p.stem == "0006_list_price")
+    wb.run(lambda cursor: cursor.execute("ALTER TABLE price_history DROP COLUMN list_price"))
+    wb.run(lambda cursor: cursor.execute(migration.read_text(encoding="utf-8")))
+    assert wb.run(list_prices) == [
+        ("ozon", "1", None),
+        ("wb", "1", 900.0),
+        ("wb", "2", None),
+        ("wb", "3", None),
+        ("wb", "4", None),
+        ("wb", "5", None),  # без сырого ответа взять неоткуда
+    ]
+
+
 def test_price_jumps_compare_with_the_previous_day(wh, wb):
     """Скачок цены больше чем на 50 % к прошлому дню - по маркетплейсу хранилища."""
     day1 = dt.datetime(2026, 10, 11, 9, 0, tzinfo=dt.UTC)
