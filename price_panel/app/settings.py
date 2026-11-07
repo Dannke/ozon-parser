@@ -156,6 +156,8 @@ class Settings:
     benchmark: BenchmarkSettings = field(default_factory=BenchmarkSettings)
     backup: BackupSettings = field(default_factory=BackupSettings)
     wb: WildberriesSettings = field(default_factory=WildberriesSettings)
+    # marketplaces.ozon.daily: собирать ли Ozon в ежедневном прогоне.
+    ozon_daily: bool = True
     path: Path | None = None
 
     def categories(self, marketplace: str = OZON) -> tuple:
@@ -338,6 +340,14 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
     wb_dest = str(wb.get("dest") or "")
     if wb_dest and not WB_DEST_RE.fullmatch(wb_dest):
         raise SettingsError("marketplaces.wb.dest={!r}: ожидается целое число".format(wb_dest))
+    ozon = marketplaces.get("ozon") or {}
+    if not isinstance(ozon, dict):
+        raise SettingsError("Раздел 'marketplaces.ozon' должен быть словарём")
+    ozon_daily = bool(ozon.get("daily", True))
+    if not ozon_daily and not wb.get("enabled"):
+        raise SettingsError(
+            "marketplaces: выключены ozon.daily и wb.enabled - прогону нечего собирать"
+        )
     if wb.get("enabled") and not wb_dest:
         raise SettingsError("marketplaces.wb: включён, но не задан dest (регион доставки)")
     # У WB 100 товаров на странице, а глубже первой выдача грузится только
@@ -396,6 +406,7 @@ def parse_settings(data: Any, path: Path | None = None) -> Settings:
             request_delay=_float(wb, "request_delay", 5.0, minimum=3.0, where="marketplaces.wb."),
             categories=wb_categories,
         ),
+        ozon_daily=ozon_daily,
         backup=BackupSettings(
             enabled=bool(backup.get("enabled", False)),
             directory=_path(backup.get("dir")) or DEFAULT_BACKUP_DIR,

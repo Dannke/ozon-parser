@@ -180,6 +180,12 @@
 | `window_hours`  | `8`    | Сколько часов в сутки отводится на парсинг |
 | `safety_factor` | `0.8`  | Какая доля окна закладывается в рекомендацию размера panel |
 
+### marketplaces.ozon
+
+| Ключ    | Сейчас  | Назначение |
+| ------- | ------- | ---------- |
+| `daily` | `false` | Собирать ли Ozon в ежедневном прогоне (`schedule`), по умолчанию `true`. Выключен 08.11.2026: с 19.10 Ozon блокирует почти каждый прогон. Ручные `parse`, `discover`, `benchmark` по Ozon работают как раньше. Если выключены и Ozon, и WB — ошибка настроек |
+
 ### marketplaces.wb
 
 Discovery и сбор Wildberries: `python -m price_panel discover / parse
@@ -188,7 +194,7 @@ Discovery и сбор Wildberries: `python -m price_panel discover / parse
 
 | Ключ                  | Сейчас    | Назначение |
 | --------------------- | --------- | ---------- |
-| `enabled`             | `true`    | Разрешить discovery и сбор WB: ежедневный прогон собирает WB параллельно с Ozon. Без него `discover` / `parse --marketplace wb` — ошибка настроек (код 1). Если раздела нет — `false`. Включён 12.10.2026; ozon-market-analytics пока смешивает строки WB с Ozon ([limitations.md](limitations.md#данные)) |
+| `enabled`             | `true`    | Разрешить discovery и сбор WB: ежедневный прогон собирает WB (параллельно с Ozon, если включён `marketplaces.ozon.daily`). Без него `discover` / `parse --marketplace wb` — ошибка настроек (код 1). Если раздела нет — `false`. Включён 12.10.2026; ozon-market-analytics пока смешивает строки WB с Ozon ([limitations.md](limitations.md#данные)) |
 | `dest`                | `-365341` | Регион доставки WB (целое число): Новосибирск, ПВЗ «Чаплыгина 16». От него зависят наличие и сроки; пишется в `parse_runs.region`. Обязателен при `enabled: true` |
 | `batch_size`          | `100`     | Карточек в одном запросе, 1..100 |
 | `request_delay`       | `8`       | Пауза между обращениями к WB — запросами карточек и страницами выдачи в discovery, с (не меньше 3, по умолчанию 5); разброс — `discovery.request_jitter` у выдачи, до 30 % у карточек |

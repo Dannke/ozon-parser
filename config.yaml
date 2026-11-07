@@ -167,9 +167,15 @@ benchmark:
   safety_factor: 0.8
 
 marketplaces:
+  ozon:
+    # Собирать ли Ozon в ежедневном прогоне (по умолчанию true). Выключен
+    # 08.11.2026: с 19.10 Ozon блокирует почти каждый прогон, его чинят
+    # отдельно. Ручные parse / discover / benchmark это не затрагивает.
+    daily: false
   wb:
     # Сбор Wildberries (python -m price_panel discover / parse --marketplace wb):
-    # ежедневный прогон собирает WB параллельно с Ozon. Включён 12.10.2026;
+    # ежедневный прогон собирает WB (параллельно с Ozon, если включён и он).
+    # Включён 12.10.2026;
     # ozon-market-analytics пока не различает маркетплейсы и смешивает строки
     # WB с Ozon - её нужно поправить отдельно (docs/limitations.md).
     enabled: true

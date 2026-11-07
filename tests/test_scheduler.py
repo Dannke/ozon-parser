@@ -421,9 +421,39 @@ def with_wb(**schedule):
     return parse_settings(data)
 
 
+def wb_only(**schedule):
+    data = dict(
+        BASE,
+        schedule=dict({"daily_at": "05:30", "ensure_session": False}, **schedule),
+        marketplaces=dict(WB_ON, ozon={"daily": False}),
+    )
+    return parse_settings(data)
+
+
+def test_wb_only_daily_run_skips_ozon(monkeypatch):
+    """marketplaces.ozon.daily: false - прогон запускает только WB, без потоков."""
+    calls: list = []
+
+    def fake_run(command, **kwargs):
+        calls.append(market_of(command))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+    reports: list = []
+    monkeypatch.setattr(
+        scheduler.notify,
+        "report_job",
+        lambda code, backup_ok, summary, market_codes=None: reports.append((code, market_codes)),
+    )
+    assert scheduler.run_job(wb_only()) == 0
+    assert calls == ["wb"]
+    assert reports == [(0, None)]
+
+
 def test_wb_steps_have_no_session_and_name_the_marketplace():
     assert scheduler.enabled_marketplaces(settings()) == ["ozon"]
     assert scheduler.enabled_marketplaces(with_wb()) == ["ozon", "wb"]
+    assert scheduler.enabled_marketplaces(wb_only()) == ["wb"]
     steps = scheduler.job_commands(with_wb(), "wb")
     assert [name for name, _ in steps] == ["parse"]
     assert steps[0][1][3:] == ["parse", "--marketplace", "wb", "--kind", "daily", "--missing-today"]

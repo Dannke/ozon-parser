@@ -14,8 +14,8 @@ schedule.block_retries раз, и об этом уходит отдельное 
 schedule.parse_timeout_hours. Резервная копия базы (если backup.enabled) и
 оповещение об итоге (notify.py) - один раз, после всех повторов.
 
-Шаги идут на каждый включённый маркетплейс (Ozon всегда, WB - при
-marketplaces.wb.enabled), у каждого свой конвейер в своём потоке и свои
+Шаги идут на каждый включённый маркетплейс (Ozon - при marketplaces.ozon.daily,
+WB - при marketplaces.wb.enabled), у каждого свой конвейер в своём потоке и свои
 повторы после блокировки: Ozon собирает часами, WB - минутами, и один не ждёт
 другого. Общий у них только предел schedule.parse_timeout_hours; копия базы
 и итог - один раз, когда закончат все. Пока маркетплейс один, всё идёт без
@@ -111,8 +111,9 @@ def day_start(now: dt.datetime, tz: dt.tzinfo) -> dt.datetime:
 
 
 def enabled_marketplaces(settings: Settings) -> list:
-    """Маркетплейсы ежедневного прогона: Ozon всегда, WB - при marketplaces.wb.enabled."""
-    return [OZON] + ([WB] if settings.wb.enabled else [])
+    """Маркетплейсы ежедневного прогона: Ozon - при marketplaces.ozon.daily, WB - при
+    marketplaces.wb.enabled."""
+    return ([OZON] if settings.ozon_daily else []) + ([WB] if settings.wb.enabled else [])
 
 
 def job_commands(settings: Settings, marketplace: str = OZON) -> list:
@@ -283,7 +284,8 @@ def run_job(settings: Settings, clock=time.time, sleep=time.sleep) -> int:
     markets = enabled_marketplaces(settings)
     notify.report_start(details=lambda: start_details(settings, markets))
     if len(markets) == 1:
-        codes = {OZON: run_market(settings, OZON, deadline, clock=clock, sleep=sleep)}
+        market = markets[0]
+        codes = {market: run_market(settings, market, deadline, clock=clock, sleep=sleep)}
     else:
         with ThreadPoolExecutor(len(markets), thread_name_prefix="market") as pool:
             futures = {
