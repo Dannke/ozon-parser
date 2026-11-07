@@ -47,7 +47,7 @@ def record(sku: str) -> dict:
 def test_price_is_what_the_page_shows(sku, price, old_price, discount):
     product = record(sku)
     assert product["price"] == Decimal(price)
-    assert product["old_price"] == Decimal(old_price)
+    assert product["old_price"] == product["list_price"] == Decimal(old_price)
     assert product["discount_pct"] == Decimal(discount)
     # Цену с WB Кошельком считает сайт, в ответе её нет.
     assert product["card_price"] is None
@@ -68,6 +68,7 @@ def test_card_fields_follow_the_common_contract():
 def test_out_of_stock_card_has_no_price_and_is_valid():
     product = record("1149093062")
     assert product["price"] is None and product["old_price"] is None
+    assert product["list_price"] is None
     assert product["is_available"] is False
     assert problems(product) == ""
 
@@ -82,6 +83,8 @@ def test_strikethrough_not_above_price_is_dropped():
     card["sizes"][0]["price"]["basic"] = card["sizes"][0]["price"]["product"]
     product = product_record(card)
     assert product["old_price"] is None and product["discount_pct"] is None
+    # В истории зачёркнутая остаётся: цена дошла до неё.
+    assert product["list_price"] == product["price"]
 
 
 def test_cheapest_size_with_price_wins():

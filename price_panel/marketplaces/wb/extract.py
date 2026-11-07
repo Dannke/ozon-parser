@@ -3,7 +3,8 @@
 Правило цены сверено на живых карточках 11.10.2026 (docs/verification-log.md):
 
     sizes[].price.product  - цена на странице, копейки  -> price
-    sizes[].price.basic    - зачёркнутая цена, копейки  -> old_price
+    sizes[].price.basic    - зачёркнутая цена, копейки  -> old_price (если выше
+                             price) и list_price (всегда)
 
 Цена с WB Кошельком на странице на 2 % ниже price, но её считает сам сайт, в
 ответе её нет, поэтому card_price у WB пуст. Количество на складе WB для
@@ -67,6 +68,8 @@ def product_record(card: dict) -> dict:
         "price": price,
         "card_price": None,
         "old_price": old_price,
+        # Тот же basic без отбора: видно и дни, когда цена дошла до зачёркнутой.
+        "list_price": basic,
         "discount_pct": discount_pct(price, old_price),
         "is_available": price is not None and bool(card.get("totalQuantity")),
         # Рейтинг 0 у товара без отзывов - «нет оценки», а не ноль баллов.

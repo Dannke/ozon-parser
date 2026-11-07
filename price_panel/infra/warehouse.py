@@ -96,18 +96,19 @@ ON CONFLICT (marketplace, sku) DO UPDATE SET
 # записи в рамках одного прогона обновляет ту же строку, а не плодит дубль.
 PRICE_UPSERT = """
 INSERT INTO price_history (
-    marketplace, run_id, sku, collected_at, price, card_price, old_price, discount_pct,
-    is_available, rating, reviews_total, source
+    marketplace, run_id, sku, collected_at, price, card_price, old_price, list_price,
+    discount_pct, is_available, rating, reviews_total, source
 ) VALUES (
     %(marketplace)s, %(run_id)s, %(sku)s, %(collected_at)s, %(price)s, %(card_price)s,
-    %(old_price)s, %(discount_pct)s, %(is_available)s, %(rating)s, %(reviews_total)s,
-    %(source)s
+    %(old_price)s, %(list_price)s, %(discount_pct)s, %(is_available)s, %(rating)s,
+    %(reviews_total)s, %(source)s
 )
 ON CONFLICT (run_id, sku) DO UPDATE SET
     collected_at = EXCLUDED.collected_at,
     price = EXCLUDED.price,
     card_price = EXCLUDED.card_price,
     old_price = EXCLUDED.old_price,
+    list_price = EXCLUDED.list_price,
     discount_pct = EXCLUDED.discount_pct,
     is_available = EXCLUDED.is_available,
     rating = EXCLUDED.rating,
@@ -187,6 +188,8 @@ PRICE_FIELDS = (
     "price",
     "card_price",
     "old_price",
+    # Зачёркнутая цена как её отдаёт сайт, даже если не выше price (сейчас только WB).
+    "list_price",
     "discount_pct",
     "is_available",
     "rating",

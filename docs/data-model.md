@@ -26,6 +26,7 @@ advisory lock и одной транзакцией. Любая команда `p
 | `0003_parse_run_blocked_status`   | Статус прогона `blocked` (сработал предохранитель)    |
 | `0004_multi_marketplace`          | Колонка `marketplace` во всех таблицах конвейера, справочник `marketplaces`, составные ключи, `parse_runs.region`; представления — с `marketplace` |
 | `0005_wildberries`                | Маркетплейс `wb` в справочнике, таблица `raw_products` (сырые ответы)          |
+| `0006_list_price`                 | `price_history.list_price` — зачёркнутая цена WB с сайта, даже если не выше цены; старые строки WB заполнены из `raw_products` |
 
 Как добавить миграцию — в [development.md](development.md#миграции).
 
@@ -44,7 +45,7 @@ Ozon. Сбор WB включается `marketplaces.wb.enabled` в `config.yaml
 | `discovery_runs` | Запуски discovery: категория, источник, seed, запросов, найдено, отобрано, статус и причина неудачи |
 | `parse_runs`     | Запуски парсера: `kind` (`daily` / `manual` / `benchmark`), `status` (`running` / `success` / `partial` / `failed` / `interrupted` / `blocked`), `started_at`, `finished_at`, `total_sku`, `processed_count`, `success_count`, `error_count`, `duration_seconds`, `sku_per_minute`, `avg_sku_seconds`, `request_delay` (у WB — пауза между батчами), `region` (регион сбора: у WB — `dest` из `config.yaml`; у Ozon пусто — регион он определяет по IP, см. issue #4) |
 | `products`       | Последние атрибуты карточки: название, картинка, цвет, материал, комплектация, фото/видео, rich-контент |
-| `price_history`  | Наблюдение на момент сбора: `collected_at`, `price`, `card_price` (с Ozon Картой; у WB пусто), `old_price` (зачёркнутая), `discount_pct`, `is_available`, `rating`, `reviews_total`, `source`, `run_id` |
+| `price_history`  | Наблюдение на момент сбора: `collected_at`, `price`, `card_price` (с Ozon Картой; у WB пусто), `old_price` (зачёркнутая, только если выше `price`), `list_price` (зачёркнутая как её отдаёт сайт, даже если не выше `price`; сейчас только WB, у Ozon пусто), `discount_pct`, `is_available`, `rating`, `reviews_total`, `source`, `run_id` |
 | `parse_errors`   | Ошибка по SKU: `run_id`, `sku`, `occurred_at`, `error_type`, `error_message`, `attempts` |
 | `raw_products`   | Сырой ответ сайта по SKU (сейчас только WB): `run_id`, `sku`, `collected_at`, `payload` (JSONB, без служебных полей). Пишется той же транзакцией, что и наблюдение; старше 90 дней удаляется после каждого прогона (`Warehouse.prune_raw`) |
 
@@ -205,6 +206,7 @@ ORDER BY category, observed_date;
 | `title`         | `name`                                                              |
 | `price`         | `sizes[].price.product` / 100 — минимальная среди размеров с ценой  |
 | `old_price`     | `sizes[].price.basic` / 100, если выше `price`                      |
+| `list_price`    | `sizes[].price.basic` / 100 всегда: видно и дни, когда цена дошла до зачёркнутой |
 | `card_price`    | пусто: цену с WB Кошельком (на 2 % ниже) считает сайт, в ответе её нет |
 | `is_available`  | есть цена и `totalQuantity` > 0                                     |
 | `rating`        | `reviewRating`; пусто, если отзывов нет (0 у WB — «нет оценки»)     |
