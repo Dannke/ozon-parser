@@ -184,10 +184,23 @@ def test_wildberries_defaults_and_repository_config():
     settings = load_settings(settings_module.DEFAULT_PATH)
     wb = settings.wb
     assert (wb.enabled, wb.dest, wb.batch_size) == (True, "-365341", 100)
+    # Ozon выключен в ежедневном прогоне 08.11.2026: блокировки с 19.10.
+    assert settings.ozon_daily is False
     assert wb.request_delay >= 3
     # Категории WB - те же, что у Ozon, чтобы panel можно было сравнивать.
     assert [c.name for c in settings.categories("wb")] == [c.name for c in settings.categories()]
     assert {c.source for c in settings.categories("wb")} == {"wb_catalog"}
+
+
+def test_ozon_daily_switch():
+    assert parse_settings(VALID).ozon_daily is True
+    wb_on = {"enabled": True, "dest": "-1"}
+    off = parse_settings(dict(VALID, marketplaces={"ozon": {"daily": False}, "wb": wb_on}))
+    assert off.ozon_daily is False
+    with pytest.raises(SettingsError, match="нечего собирать"):
+        parse_settings(dict(VALID, marketplaces={"ozon": {"daily": False}}))
+    with pytest.raises(SettingsError, match="словарём"):
+        parse_settings(dict(VALID, marketplaces={"ozon": "no"}))
 
 
 @pytest.mark.parametrize(
