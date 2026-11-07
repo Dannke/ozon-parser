@@ -21,7 +21,7 @@
 
 ## Ежедневный запуск
 
-Каждый день в `schedule.daily_at` из `config.yaml` (сейчас 08:45 по Москве)
+Каждый день в `schedule.daily_at` из `config.yaml` (сейчас 09:30 по Москве)
 выполняются шаги отдельными процессами — это команда
 `python -m price_panel schedule --once`:
 
