@@ -613,6 +613,42 @@ class Warehouse:
 
         return self.run(delete)
 
+    def raw_price_rows(self) -> list:
+        """(run_id, sku, карточка, old_price, list_price) наблюдений с ценой и сырым
+        ответом - для сверки разбора; от карточки - только id и размеры с ценами."""
+
+        def query(cursor) -> list:
+            cursor.execute(
+                "SELECT r.run_id, r.sku, "
+                "jsonb_build_object('id', r.payload -> 'id', 'sizes', r.payload -> 'sizes'), "
+                "ph.old_price, ph.list_price "
+                "FROM raw_products r JOIN price_history ph "
+                "ON ph.marketplace = r.marketplace AND ph.run_id = r.run_id AND ph.sku = r.sku "
+                "WHERE r.marketplace = %s AND ph.price IS NOT NULL ORDER BY r.run_id, r.sku",
+                (self.marketplace,),
+            )
+            return cursor.fetchall()
+
+        return self.run(query)
+
+    def set_list_prices(self, rows: Iterable) -> int:
+        """list_price по (run_id, sku) маркетплейса, одной транзакцией; совпадающие
+        значения не трогает. Возвращает число изменённых строк."""
+
+        def update(cursor) -> int:
+            changed = 0
+            for run_id, sku, value in rows:
+                cursor.execute(
+                    "UPDATE price_history SET list_price = %s "
+                    "WHERE marketplace = %s AND run_id = %s AND sku = %s "
+                    "AND list_price IS DISTINCT FROM %s",
+                    (value, self.marketplace, run_id, sku, value),
+                )
+                changed += cursor.rowcount
+            return changed
+
+        return self.run(update)
+
     def skus_without_details(self, skus: Iterable[str]) -> set:
         """SKU, у которых ещё нет описания: карточки нет в products или вторая
         часть (has_rich_content) ни разу не приходила."""

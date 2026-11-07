@@ -229,6 +229,22 @@ def cmd_runs(args, settings: Settings) -> int:
     return 0
 
 
+def cmd_list_price(args, settings: Settings) -> int:
+    from price_panel.app.list_price import reconcile
+
+    with _warehouse(WB) as wh:
+        stats = reconcile(wh, apply=args.apply)
+    print(
+        "WB: сверено {checked} наблюдений с сырым ответом, list_price расходится с разбором: "
+        "{differ}, исправлено: {updated}; old_price не совпал с разбором: {old_mismatch}; "
+        "не разобрано: {unparsed}".format(**stats)
+    )
+    if stats["differ"] and not args.apply:
+        print("Исправить: python -m price_panel list-price --apply")
+    # old_price обязан совпадать с basic - иначе ошибка разбора, а не данных.
+    return 1 if stats["old_mismatch"] or stats["unparsed"] else 0
+
+
 def cmd_backup(args, settings: Settings) -> int:
     # Базу не трогаем через PG_DSN: pg_dump работает внутри контейнера.
     try:
@@ -350,6 +366,14 @@ def build_parser() -> argparse.ArgumentParser:
     runs.add_argument("--limit", type=int, default=10)
     add_marketplace(runs)
     runs.set_defaults(func=cmd_runs)
+
+    list_price = commands.add_parser(
+        "list-price", help="сверить list_price WB с разбором сырых ответов"
+    )
+    list_price.add_argument(
+        "--apply", action="store_true", help="исправить расхождения (иначе только отчёт)"
+    )
+    list_price.set_defaults(func=cmd_list_price)
 
     commands.add_parser("backup", help="резервная копия базы (backup в config.yaml)").set_defaults(
         func=cmd_backup

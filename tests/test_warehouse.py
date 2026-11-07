@@ -452,6 +452,48 @@ def test_list_price_is_stored_and_backfilled_from_raw(wh, wb):
     ]
 
 
+def test_list_price_reconcile_reports_then_fixes_idempotently(wb):
+    """list-price: сверка с product_record; --apply чинит только расхождения."""
+    from price_panel.app.list_price import reconcile
+
+    def raw(sku, product, basic):
+        return {"id": int(sku), "sizes": [{"price": {"product": product, "basic": basic}}]}
+
+    at = dt.datetime(2026, 10, 20, tzinfo=dt.UTC)
+    run_id = wb.start_parse_run("daily", "panel", 4, 8.0, region="-365341")
+    rows = [
+        # Заполнено неверно (пусто), разбор даёт 900 - цена на уровне зачёркнутой.
+        ("1", {"old_price": None, "list_price": None}, raw("1", 90000, 90000)),
+        # Совпадает с разбором и с old_price.
+        ("2", {"old_price": 7990.0, "list_price": 7990.0}, raw("2", 146300, 799000)),
+        # old_price не равен basic - ошибка разбора, а не повод переписывать old_price.
+        ("3", {"old_price": 7990.0, "list_price": 5000.0}, raw("3", 146300, 500000)),
+        # Размеры не разбираются - пропуск, а не падение.
+        ("4", {"old_price": None, "list_price": None}, {"id": 4, "sizes": [{"price": {}}, 5]}),
+    ]
+    for sku, prices, payload in rows:
+        wb.record_product(run_id, PRODUCT | {"sku": sku, "raw": payload} | prices, at)
+
+    report = reconcile(wb)
+    assert dict(report) == {
+        "checked": 3,
+        "differ": 1,
+        "old_mismatch": 1,
+        "unparsed": 1,
+        "updated": 0,
+    }
+
+    def list_price(cursor):
+        cursor.execute("SELECT list_price FROM price_history WHERE sku = '1'")
+        return cursor.fetchone()[0]
+
+    assert wb.run(list_price) is None  # без --apply база не меняется
+    assert reconcile(wb, apply=True)["updated"] == 1
+    assert float(wb.run(list_price)) == 900.0
+    again = reconcile(wb, apply=True)
+    assert (again["differ"], again["updated"]) == (0, 0)
+
+
 def test_price_jumps_compare_with_the_previous_day(wh, wb):
     """Скачок цены больше чем на 50 % к прошлому дню - по маркетплейсу хранилища."""
     day1 = dt.datetime(2026, 10, 11, 9, 0, tzinfo=dt.UTC)

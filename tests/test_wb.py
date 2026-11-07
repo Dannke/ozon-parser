@@ -87,6 +87,16 @@ def test_strikethrough_not_above_price_is_dropped():
     assert product["list_price"] == product["price"]
 
 
+def test_strikethrough_below_price_is_kept_only_in_list_price():
+    """basic ниже цены: на странице зачёркнутой нет, это не ошибка данных."""
+    card = json.loads(json.dumps(CARDS["1343721205"]))
+    card["sizes"][0]["price"]["basic"] = card["sizes"][0]["price"]["product"] - 10000
+    product = product_record(card)
+    assert product["old_price"] is None and product["discount_pct"] is None
+    assert product["list_price"] == product["price"] - 100
+    assert problems(product) == ""
+
+
 def test_cheapest_size_with_price_wins():
     card = json.loads(json.dumps(CARDS["1343721205"]))
     cheaper = json.loads(json.dumps(card["sizes"][0]))

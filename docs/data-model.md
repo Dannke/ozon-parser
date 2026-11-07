@@ -206,7 +206,7 @@ ORDER BY category, observed_date;
 | `title`         | `name`                                                              |
 | `price`         | `sizes[].price.product` / 100 — минимальная среди размеров с ценой  |
 | `old_price`     | `sizes[].price.basic` / 100, если выше `price`                      |
-| `list_price`    | `sizes[].price.basic` / 100 всегда: видно и дни, когда цена дошла до зачёркнутой |
+| `list_price`    | `sizes[].price.basic` / 100 всегда: видно и дни, когда цена дошла до зачёркнутой. Сверка с сырыми ответами — `python -m price_panel list-price` |
 | `card_price`    | пусто: цену с WB Кошельком (на 2 % ниже) считает сайт, в ответе её нет |
 | `is_available`  | есть цена и `totalQuantity` > 0                                     |
 | `rating`        | `reviewRating`; пусто, если отзывов нет (0 у WB — «нет оценки»)     |
