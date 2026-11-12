@@ -379,6 +379,9 @@ class SummaryWarehouse:
     def panel_skus(self, missing_since=None):
         return ["3"]
 
+    def collected_since(self, since):
+        return 2
+
     def recent_runs(self, limit):
         return self.runs[:limit]
 

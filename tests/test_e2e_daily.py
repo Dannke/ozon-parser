@@ -92,8 +92,9 @@ def test_daily_run_writes_history_errors_and_accounting(wh, select, golden, monk
 
     daily = ["--config", str(settings), "parse", "--kind", "daily", "--missing-today"]
     first = cli.main(daily)
-    # Повтор за тот же день берёт только SKU без успешного наблюдения - здесь
-    # это карточка, которой нет: прогон без единого успеха, код 1.
+    # Повтор за тот же день берёт только SKU без успешного наблюдения, кроме тех,
+    # про которые сайт уже ответил «нет карточки»: здесь собирать нечего, код 0
+    # и нового прогона нет (раньше - прогон из одной такой карточки, код 1).
     second = cli.main(daily)
 
     golden(

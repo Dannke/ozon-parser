@@ -159,8 +159,9 @@ def cmd_parse(args, settings: Settings) -> int:
     with _warehouse(args.marketplace) as wh:
         skus, source = _skus_for_parse(args, wh, settings)
         if not skus and args.missing_today and wh.panel_skus(args.category, limit=1):
-            log.info("Все SKU panel за сегодня уже собраны - парсить нечего")
-            print("Все SKU panel за сегодня уже собраны")
+            # Все собраны или сайт сегодня уже ответил, что карточки нет (not_found).
+            log.info("За сегодня собирать больше нечего - парсить нечего")
+            print("За сегодня собирать больше нечего")
             return 0
         if not skus:
             log.error("Нет SKU для парсинга (%s). Сначала: python -m price_panel discover", source)
